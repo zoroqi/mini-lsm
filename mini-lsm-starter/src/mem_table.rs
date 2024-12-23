@@ -48,7 +48,13 @@ impl MemTable {
 
     /// Create a new mem-table with WAL
     pub fn create_with_wal(_id: usize, _path: impl AsRef<Path>) -> Result<Self> {
-        unimplemented!()
+        let wal = Wal::create(_path)?;
+        Ok(MemTable {
+            map: Arc::new(SkipMap::new()),
+            wal: Some(wal),
+            id: _id,
+            approximate_size: Arc::new(AtomicUsize::new(0)),
+        })
     }
 
     /// Create a memtable from WAL
@@ -86,7 +92,7 @@ impl MemTable {
         self.map
             .insert(Bytes::copy_from_slice(_key), Bytes::copy_from_slice(_value));
         self.approximate_size
-            .fetch_add(_value.len(), Ordering::Relaxed);
+            .fetch_add(_value.len() + _key.len(), Ordering::Relaxed);
         Ok(())
     }
 
