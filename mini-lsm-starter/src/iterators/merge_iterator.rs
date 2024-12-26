@@ -54,11 +54,10 @@ impl<I: StorageIterator> MergeIterator<I> {
 
         let mut heap = BinaryHeap::from(iter);
         let top = heap.pop();
-        let r = MergeIterator {
+        MergeIterator {
             iters: heap,
             current: top,
-        };
-        r
+        }
     }
 }
 
