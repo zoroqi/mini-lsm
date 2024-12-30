@@ -46,7 +46,7 @@ impl Block {
         let entry_size = (&data[len - SIZEOF_U32..]).get_u32() as usize;
         let offset_len = entry_size * SIZEOF_U16;
 
-        let offset = (&data[len - SIZEOF_U32 - offset_len..len - SIZEOF_U32])
+        let offset = &data[len - SIZEOF_U32 - offset_len..len - SIZEOF_U32]
             .chunks(SIZEOF_U16)
             .map(|mut x| x.get_u16())
             .collect::<Vec<u16>>();
