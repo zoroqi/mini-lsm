@@ -343,7 +343,7 @@ impl LsmStorageInner {
     pub fn force_freeze_memtable(&self, _state_lock_observer: &MutexGuard<'_, ()>) -> Result<()> {
         let new_memtable = Arc::new(MemTable::create(self.next_sst_id()));
         let mut state = self.state.write();
-        let mut state_mut = Arc::make_mut(&mut state);
+        let state_mut = Arc::make_mut(&mut state);
         // let mut state_mut = state.as_ref().clone();
         let old_memtable = std::mem::replace(&mut state_mut.memtable, new_memtable);
         // let old_memtable = Arc::clone(&state_mut.memtable);

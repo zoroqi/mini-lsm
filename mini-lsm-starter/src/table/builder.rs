@@ -8,7 +8,6 @@ use anyhow::Result;
 use bytes::BufMut;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::SystemTime;
 
 pub(crate) const SIZEOF_U64: usize = std::mem::size_of::<u64>();
 pub(crate) const SIZEOF_U32: usize = std::mem::size_of::<u32>();

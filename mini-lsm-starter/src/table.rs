@@ -15,7 +15,7 @@ use bytes::{Buf, BufMut};
 pub use iterator::SsTableIterator;
 
 use crate::block::Block;
-use crate::key::{KeyBytes, KeySlice, KeyVec};
+use crate::key::{KeyBytes, KeySlice};
 use crate::lsm_storage::BlockCache;
 
 use self::bloom::Bloom;
@@ -218,19 +218,59 @@ impl SsTable {
 
     /// Read a block from the disk.
     pub fn read_block(&self, block_idx: usize) -> Result<Arc<Block>> {
-        unimplemented!()
+        if block_idx >= self.block_meta.len() {
+            return Err(anyhow::anyhow!("block_idx out of range"));
+        }
+        let begin = self.block_meta[block_idx].offset;
+        let end = if block_idx + 1 < self.block_meta.len() {
+            self.block_meta[block_idx + 1].offset
+        } else {
+            self.block_meta_offset
+        };
+        let meta = &self.block_meta[block_idx];
+        let data = self.file.read(begin as u64, (end - begin) as u64)?;
+
+        Ok(Arc::new(Block::decode(&data)))
     }
 
     /// Read a block from disk, with block cache. (Day 4)
     pub fn read_block_cached(&self, block_idx: usize) -> Result<Arc<Block>> {
-        unimplemented!()
+        if block_idx >= self.block_meta.len() {
+            return Err(anyhow::anyhow!("block_idx out of range"));
+        }
+        if let Some(cache) = &self.block_cache {
+            let cache_key = (self.sst_id(), block_idx);
+            let block = cache.get(&cache_key);
+            let block = if let Some(block) = block {
+                block
+            } else {
+                // 总感觉怪怪的, 为什么 cache.get_with 是 FnOnce 的.
+                let b = self.read_block(block_idx)?;
+                cache.insert(cache_key, b);
+                cache.get(&cache_key).unwrap()
+            };
+            Ok(block)
+        } else {
+            self.read_block(block_idx)
+        }
     }
 
     /// Find the block that may contain `key`.
     /// Note: You may want to make use of the `first_key` stored in `BlockMeta`.
     /// You may also assume the key-value pairs stored in each consecutive block are sorted.
     pub fn find_block_idx(&self, key: KeySlice) -> usize {
-        unimplemented!()
+        let mut l = 0;
+        let mut h = self.block_meta.len();
+        while l < h {
+            let mid = l + (h - l) / 2;
+            let mid_key = self.block_meta[mid].last_key.as_key_slice();
+            if mid_key < key {
+                l = mid + 1;
+            } else {
+                h = mid;
+            }
+        }
+        l
     }
 
     /// Get number of data blocks.
