@@ -4,6 +4,7 @@
 mod builder;
 mod iterator;
 
+use crate::key::KeyVec;
 pub use builder::BlockBuilder;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 pub use iterator::BlockIterator;
@@ -56,5 +57,29 @@ impl Block {
             data: entry.to_vec(),
             offsets: offset.to_vec(),
         }
+    }
+}
+
+impl Block {
+    pub fn get_key(&self, idx: usize) -> KeyVec {
+        let offset = self.offsets[idx] as usize;
+        let entry = self.data[offset..].as_ref();
+
+        let key_len_begin = 0;
+        let key_len_end = key_len_begin + iterator::SIZEOF_U16;
+        let key_len = entry[key_len_begin..key_len_end].as_ref().get_u16() as usize;
+
+        let key_begin = key_len_end;
+        let key_end = key_begin + key_len;
+
+        let key = &entry[key_begin..key_end];
+        KeyVec::from_vec(key.to_vec())
+    }
+
+    pub fn first_key(&self) -> KeyVec {
+        self.get_key(0)
+    }
+    pub fn last_key(&self) -> KeyVec {
+        self.get_key(self.offsets.len() - 1)
     }
 }

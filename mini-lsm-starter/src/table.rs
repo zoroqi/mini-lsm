@@ -11,14 +11,18 @@ use std::sync::Arc;
 
 use anyhow::Result;
 pub use builder::SsTableBuilder;
-use bytes::Buf;
+use bytes::{Buf, BufMut};
 pub use iterator::SsTableIterator;
 
 use crate::block::Block;
-use crate::key::{KeyBytes, KeySlice};
+use crate::key::{KeyBytes, KeySlice, KeyVec};
 use crate::lsm_storage::BlockCache;
 
 use self::bloom::Bloom;
+
+pub(crate) const SIZEOF_U64: usize = std::mem::size_of::<u64>();
+pub(crate) const SIZEOF_U32: usize = std::mem::size_of::<u32>();
+pub(crate) const SIZEOF_U16: usize = std::mem::size_of::<u16>();
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockMeta {
@@ -39,12 +43,65 @@ impl BlockMeta {
         #[allow(clippy::ptr_arg)] // remove this allow after you finish
         buf: &mut Vec<u8>,
     ) {
-        unimplemented!()
+        for meta in block_meta {
+            let data = meta.encode();
+            buf.put(data.as_slice())
+        }
+    }
+
+    fn encode(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.put_u64(self.offset as u64);
+        buf.put_u16(self.first_key.len() as u16);
+        buf.put(self.first_key.raw_ref());
+        buf.put_u16(self.last_key.len() as u16);
+        buf.put(self.last_key.raw_ref());
+        buf
+    }
+
+    // 参考代码
+    // fn decode(buf: &[u8]) -> Self {
+    //     let offset = (&buf[0..SIZEOF_U64]).get_u64() as usize;
+    //     let first_key_len = (&buf[SIZEOF_U64..SIZEOF_U64 + SIZEOF_U16]).get_u16() as usize;
+    //     let first_key_begin = SIZEOF_U64 + SIZEOF_U16;
+    //     let first_key =
+    //         KeyVec::from_vec(buf[first_key_begin..first_key_begin + first_key_len].to_vec())
+    //             .into_key_bytes();
+    //
+    //     let last_key_len_begin = first_key_begin + first_key_len;
+    //     let last_key_len = (&buf[last_key_len_begin..last_key_len_begin + SIZEOF_U16])
+    //         .get_u16() as usize;
+    //     let last_key_begin = last_key_len_begin + SIZEOF_U16;
+    //     let last_key_end = last_key_begin + last_key_len;
+    //     let last_key = KeyVec::from_vec(buf[last_key_begin..last_key_end].to_vec()).into_key_bytes();
+    //     Self {
+    //         offset,
+    //         first_key,
+    //         last_key,
+    //     }
+    // }
+    fn decode(mut buf: impl Buf) -> Self {
+        let offset = buf.get_u64() as usize;
+        let first_key_len = buf.get_u16() as usize;
+        let first_key = KeyBytes::from_bytes(buf.copy_to_bytes(first_key_len));
+        let last_key_len = buf.get_u16() as usize;
+        let last_key = KeyBytes::from_bytes(buf.copy_to_bytes(last_key_len));
+        Self {
+            offset,
+            first_key,
+            last_key,
+        }
     }
 
     /// Decode block meta from a buffer.
     pub fn decode_block_meta(buf: impl Buf) -> Vec<BlockMeta> {
-        unimplemented!()
+        let mut metas: Vec<BlockMeta> = Vec::new();
+        let mut buf = buf;
+        while buf.has_remaining() {
+            let meta = BlockMeta::decode(&mut buf);
+            metas.push(meta);
+        }
+        metas
     }
 }
 
@@ -108,7 +165,35 @@ impl SsTable {
 
     /// Open SSTable from a file.
     pub fn open(id: usize, block_cache: Option<Arc<BlockCache>>, file: FileObject) -> Result<Self> {
-        unimplemented!()
+        let file_size = file.size();
+
+        let meta_data_offset = file.read(file_size - SIZEOF_U32 as u64, SIZEOF_U32 as u64)?;
+        let meta_data_offset = meta_data_offset.as_slice().get_u32() as u64;
+        let meta_data = file.read(
+            meta_data_offset,
+            file_size - meta_data_offset - SIZEOF_U32 as u64,
+        )?;
+        let block_meta = BlockMeta::decode_block_meta(&*meta_data);
+
+        let first_key = block_meta
+            .first()
+            .map(|x| x.first_key.clone())
+            .unwrap_or_default();
+        let last_key = block_meta
+            .last()
+            .map(|x| x.last_key.clone())
+            .unwrap_or_default();
+        Ok(Self {
+            file,
+            block_meta,
+            block_meta_offset: meta_data_offset as usize,
+            id,
+            block_cache,
+            first_key,
+            last_key,
+            bloom: None,
+            max_ts: 0,
+        })
     }
 
     /// Create a mock SST with only first key + last key metadata
