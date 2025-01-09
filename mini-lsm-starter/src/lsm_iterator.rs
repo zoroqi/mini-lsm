@@ -34,7 +34,7 @@ impl LsmIterator {
             end: false,
         };
         n.move_del_key()?;
-        n.remove_low().unwrap();
+        // n.skip_low().unwrap();
         n.check_end();
         Ok(n)
     }
@@ -59,7 +59,7 @@ impl LsmIterator {
         };
         self.end = end;
     }
-    fn remove_low(&mut self) -> Result<()> {
+    fn skip_low(&mut self) -> Result<()> {
         if !self.is_valid() {
             return Ok(());
         }
@@ -71,7 +71,7 @@ impl LsmIterator {
         };
         if remove {
             self.inner.next()?;
-            return self.remove_low();
+            return self.skip_low();
         }
         Ok(())
     }

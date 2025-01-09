@@ -405,33 +405,33 @@ impl LsmStorageInner {
             .l0_sstables
             .iter()
             .map(|id| {
-                let sst = snapshot.sstables.get(id).unwrap();
-                let iter = match _lower {
-                    Included(key) => SsTableIterator::create_and_seek_to_key(
-                        Arc::clone(sst),
-                        KeySlice::from_slice(key),
-                    ),
-                    Excluded(key) => {
-                        // let mut i = SsTableIterator::create_and_seek_to_key(
-                        //     Arc::clone(sst),
-                        //     KeySlice::from_slice(key),
-                        // );
-                        // i.as_mut().map(|i| i.next());
-                        // i
-                        SsTableIterator::create_and_seek_to_key(
-                            Arc::clone(sst),
-                            KeySlice::from_slice(key),
-                        )
+                let sst = snapshot.sstables[id].clone();
+                match _lower {
+                    Included(key) => {
+                        SsTableIterator::create_and_seek_to_key(sst, KeySlice::from_slice(key))
                     }
-                    _ => SsTableIterator::create_and_seek_to_first(Arc::clone(sst)),
-                };
-                iter
+                    Excluded(key) => {
+                        let mut iter =
+                            SsTableIterator::create_and_seek_to_key(sst, KeySlice::from_slice(key));
+                        if iter.is_ok() {
+                            let i = iter.as_mut().unwrap();
+                            if i.is_valid() && i.key().raw_ref() <= key {
+                                let _ = i.next();
+                            }
+                        }
+                        iter
+                    }
+                    _ => SsTableIterator::create_and_seek_to_first(sst),
+                }
             })
-            .map(|i| i.unwrap())
-            .map(Box::new)
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<SsTableIterator>>>();
+        // .collect::<Vec<_>>();
 
-        let sst_iter = MergeIterator::create(sst);
+        if sst.is_err() {
+            return Err(sst.err().unwrap());
+        }
+
+        let sst_iter = MergeIterator::create(sst?.into_iter().map(Box::new).collect());
 
         let inner = TwoMergeIterator::create(mem_iter, sst_iter)?;
 
