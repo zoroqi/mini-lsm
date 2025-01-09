@@ -11,10 +11,10 @@ use std::sync::Arc;
 
 use anyhow::Result;
 pub use builder::SsTableBuilder;
-use bytes::{Buf, BufMut};
+use bytes::{Buf, BufMut, Bytes};
 pub use iterator::SsTableIterator;
 
-use crate::block::Block;
+use crate::block::{Block, BlockIterator};
 use crate::key::{KeyBytes, KeySlice};
 use crate::lsm_storage::BlockCache;
 
@@ -296,5 +296,21 @@ impl SsTable {
 
     pub fn max_ts(&self) -> u64 {
         self.max_ts
+    }
+
+    pub fn get(&self, _key: &[u8]) -> Option<Bytes> {
+        let key = KeySlice::from_slice(_key);
+        let idx = self.find_block_idx(key);
+        let block = self.read_block_cached(idx).ok();
+        if let Some(block) = block {
+            let iter = BlockIterator::create_and_seek_to_key(block, key);
+            if iter.is_valid() && iter.key() == key {
+                Some(Bytes::from(iter.value().to_vec()))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
 }

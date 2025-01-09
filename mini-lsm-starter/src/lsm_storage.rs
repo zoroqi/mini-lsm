@@ -293,6 +293,19 @@ impl LsmStorageInner {
                 .map(|memtable| memtable.get(_key))
                 .find_map(|v| v);
         }
+
+        if value.is_none() {
+            for id in &state.l0_sstables {
+                if let Some(sst) = state.sstables.get(id) {
+                    let v = sst.get(_key);
+                    if v.is_some() {
+                        value = v;
+                        break;
+                    }
+                }
+            }
+        }
+
         value
             .map(|v| if v.is_empty() { None } else { Some(v) })
             .map(Ok)
@@ -393,7 +406,7 @@ impl LsmStorageInner {
             .iter()
             .map(|id| {
                 let sst = snapshot.sstables.get(id).unwrap();
-                let mut iter = match _lower {
+                let iter = match _lower {
                     Included(key) => SsTableIterator::create_and_seek_to_key(
                         Arc::clone(sst),
                         KeySlice::from_slice(key),
@@ -422,6 +435,6 @@ impl LsmStorageInner {
 
         let inner = TwoMergeIterator::create(mem_iter, sst_iter)?;
 
-        LsmIterator::new(inner, _lower.clone(), _upper.clone()).map(FusedIterator::new)
+        LsmIterator::new(inner, _lower, _upper).map(FusedIterator::new)
     }
 }
