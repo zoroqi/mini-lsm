@@ -1,7 +1,8 @@
 #![allow(dead_code)] // REMOVE THIS LINE after fully implementing this functionality
 
 use std::collections::HashMap;
-use std::ops::{Bound, Deref};
+use std::ops::Bound;
+use std::ops::Bound::{Excluded, Included};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
@@ -16,11 +17,14 @@ use crate::compact::{
     SimpleLeveledCompactionController, SimpleLeveledCompactionOptions, TieredCompactionController,
 };
 use crate::iterators::merge_iterator::MergeIterator;
+use crate::iterators::two_merge_iterator::TwoMergeIterator;
+use crate::iterators::StorageIterator;
+use crate::key::KeySlice;
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
-use crate::mem_table::{MemTable, MemTableIterator};
+use crate::mem_table::MemTable;
 use crate::mvcc::LsmMvccInner;
-use crate::table::SsTable;
+use crate::table::{SsTable, SsTableIterator};
 
 pub type BlockCache = moka::sync::Cache<(usize, usize), Arc<Block>>;
 
@@ -369,16 +373,55 @@ impl LsmStorageInner {
         _lower: Bound<&[u8]>,
         _upper: Bound<&[u8]>,
     ) -> Result<FusedIterator<LsmIterator>> {
-        let state = self.state.read();
-        let iter = state.memtable.scan(_lower, _upper);
-        let mut vec = vec![iter];
-        state
+        let snapshot = {
+            let guard = self.state.read();
+            Arc::clone(&guard)
+        };
+        let iter = snapshot.memtable.scan(_lower, _upper);
+
+        let mut mem = vec![iter];
+        snapshot
             .imm_memtables
             .iter()
             .map(|m| m.scan(_lower, _upper))
-            .for_each(|i| vec.push(i));
-        let v = vec.into_iter().map(Box::new).collect();
-        let merge = MergeIterator::create(v);
-        LsmIterator::new(merge).map(FusedIterator::new)
+            .for_each(|i| mem.push(i));
+
+        let mem_iter = MergeIterator::create(mem.into_iter().map(Box::new).collect());
+
+        let sst = snapshot
+            .l0_sstables
+            .iter()
+            .map(|id| {
+                let sst = snapshot.sstables.get(id).unwrap();
+                let mut iter = match _lower {
+                    Included(key) => SsTableIterator::create_and_seek_to_key(
+                        Arc::clone(sst),
+                        KeySlice::from_slice(key),
+                    ),
+                    Excluded(key) => {
+                        // let mut i = SsTableIterator::create_and_seek_to_key(
+                        //     Arc::clone(sst),
+                        //     KeySlice::from_slice(key),
+                        // );
+                        // i.as_mut().map(|i| i.next());
+                        // i
+                        SsTableIterator::create_and_seek_to_key(
+                            Arc::clone(sst),
+                            KeySlice::from_slice(key),
+                        )
+                    }
+                    _ => SsTableIterator::create_and_seek_to_first(Arc::clone(sst)),
+                };
+                iter
+            })
+            .map(|i| i.unwrap())
+            .map(Box::new)
+            .collect::<Vec<_>>();
+
+        let sst_iter = MergeIterator::create(sst);
+
+        let inner = TwoMergeIterator::create(mem_iter, sst_iter)?;
+
+        LsmIterator::new(inner, _lower.clone(), _upper.clone()).map(FusedIterator::new)
     }
 }

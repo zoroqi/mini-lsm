@@ -102,3 +102,10 @@ impl StorageIterator for SsTableIterator {
         Ok(())
     }
 }
+
+impl SsTableIterator {
+    pub fn scan(&mut self, key: KeySlice) -> Result<()> {
+        self.seek_to_key(key)?;
+        Ok(())
+    }
+}

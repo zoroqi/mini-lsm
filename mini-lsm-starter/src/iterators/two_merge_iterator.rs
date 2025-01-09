@@ -19,7 +19,11 @@ impl<
     > TwoMergeIterator<A, B>
 {
     pub fn create(a: A, b: B) -> Result<Self> {
-        let mut iter = TwoMergeIterator { a, b, choose_a: true };
+        let mut iter = TwoMergeIterator {
+            a,
+            b,
+            choose_a: true,
+        };
         iter.choose()?;
         Ok(iter)
     }
