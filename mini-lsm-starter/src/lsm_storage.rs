@@ -1,6 +1,8 @@
 #![allow(dead_code)] // REMOVE THIS LINE after fully implementing this functionality
 
 use std::collections::HashMap;
+use std::fs;
+use std::fs::create_dir;
 use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included};
 use std::path::{Path, PathBuf};
@@ -247,6 +249,14 @@ impl LsmStorageInner {
     /// not exist.
     pub(crate) fn open(path: impl AsRef<Path>, options: LsmStorageOptions) -> Result<Self> {
         let path = path.as_ref();
+        if !path.exists() {
+            match create_dir(path) {
+                Ok(_) => {}
+                Err(e) => {
+                    return Err(anyhow::anyhow!("failed to create DB directory: {}", e));
+                }
+            }
+        }
         let state = LsmStorageState::create(&options);
 
         let compaction_controller = match &options.compaction_options {
