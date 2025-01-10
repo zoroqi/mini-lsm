@@ -22,7 +22,7 @@ use crate::iterators::StorageIterator;
 use crate::key::KeySlice;
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::Manifest;
-use crate::mem_table::{MemTable};
+use crate::mem_table::MemTable;
 use crate::mvcc::LsmMvccInner;
 use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 
@@ -159,7 +159,12 @@ impl Drop for MiniLsm {
 
 impl MiniLsm {
     pub fn close(&self) -> Result<()> {
-        unimplemented!()
+        self.flush_notifier.send(())?;
+        let mut lock = self.flush_thread.lock();
+        if let Some(handle) = lock.take() {
+            handle.join().map_err(|e| anyhow::anyhow!("{:?}", e))?;
+        }
+        Ok(())
     }
 
     /// Start the storage engine by either loading an existing directory or creating a new one if the directory does
@@ -372,10 +377,6 @@ impl LsmStorageInner {
 
     /// Force flush the earliest-created immutable memtable to disk
     pub fn force_flush_next_imm_memtable(&self) -> Result<()> {
-        if self.state.read().imm_memtables.is_empty() {
-            return Ok(());
-        }
-
         let _lock = self.state_lock.lock();
         let memtable;
         {
