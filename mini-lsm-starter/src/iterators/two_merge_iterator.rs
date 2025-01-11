@@ -103,4 +103,8 @@ impl<
         }
         self.choose()
     }
+
+    fn num_active_iterators(&self) -> usize {
+        self.a.num_active_iterators() + self.b.num_active_iterators()
+    }
 }

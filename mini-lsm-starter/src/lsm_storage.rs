@@ -1,10 +1,9 @@
 #![allow(dead_code)] // REMOVE THIS LINE after fully implementing this functionality
 
 use std::collections::HashMap;
-use std::fs;
 use std::fs::create_dir;
 use std::ops::Bound;
-use std::ops::Bound::{Excluded, Included};
+use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
@@ -436,6 +435,7 @@ impl LsmStorageInner {
         let iter = snapshot.memtable.scan(_lower, _upper);
 
         let mut mem = vec![iter];
+
         snapshot
             .imm_memtables
             .iter()
@@ -447,25 +447,24 @@ impl LsmStorageInner {
         let sst = snapshot
             .l0_sstables
             .iter()
-            .map(|id| {
-                let sst = snapshot.sstables[id].clone();
-                match _lower {
-                    Included(key) => {
-                        SsTableIterator::create_and_seek_to_key(sst, KeySlice::from_slice(key))
-                    }
-                    Excluded(key) => {
-                        let mut iter =
-                            SsTableIterator::create_and_seek_to_key(sst, KeySlice::from_slice(key));
-                        if iter.is_ok() {
-                            let i = iter.as_mut().unwrap();
-                            if i.is_valid() && i.key().raw_ref() <= key {
-                                let _ = i.next();
-                            }
-                        }
-                        iter
-                    }
-                    _ => SsTableIterator::create_and_seek_to_first(sst),
+            .map(|id| snapshot.sstables[id].clone())
+            .filter(|sst| Self::range_overlap(_lower, _upper, sst.clone()))
+            .map(|sst| match _lower {
+                Included(key) => {
+                    SsTableIterator::create_and_seek_to_key(sst, KeySlice::from_slice(key))
                 }
+                Excluded(key) => {
+                    let mut iter =
+                        SsTableIterator::create_and_seek_to_key(sst, KeySlice::from_slice(key));
+                    if iter.is_ok() {
+                        let i = iter.as_mut().unwrap();
+                        if i.is_valid() && i.key().raw_ref() <= key {
+                            let _ = i.next();
+                        }
+                    }
+                    iter
+                }
+                _ => SsTableIterator::create_and_seek_to_first(sst),
             })
             .collect::<Result<Vec<SsTableIterator>>>();
         // .collect::<Vec<_>>();
@@ -475,9 +474,26 @@ impl LsmStorageInner {
         }
 
         let sst_iter = MergeIterator::create(sst?.into_iter().map(Box::new).collect());
-
         let inner = TwoMergeIterator::create(mem_iter, sst_iter)?;
 
         LsmIterator::new(inner, _lower, _upper).map(FusedIterator::new)
+    }
+
+    fn range_overlap(_lower: Bound<&[u8]>, _upper: Bound<&[u8]>, sst: Arc<SsTable>) -> bool {
+        let first_key = sst.first_key().raw_ref();
+        let last_key = sst.last_key().raw_ref();
+        match (_lower, _upper) {
+            (Included(lower), Included(upper)) => first_key <= upper && last_key >= lower,
+            (Included(lower), Excluded(upper)) => first_key < upper && last_key >= lower,
+            (Included(lower), Unbounded) => last_key >= lower,
+
+            (Excluded(lower), Included(upper)) => first_key <= upper && last_key > lower,
+            (Excluded(lower), Excluded(upper)) => first_key < upper && last_key > lower,
+            (Excluded(lower), Unbounded) => last_key > lower,
+
+            (Unbounded, Included(upper)) => first_key <= upper,
+            (Unbounded, Excluded(upper)) => first_key < upper,
+            (Unbounded, Unbounded) => true,
+        }
     }
 }
