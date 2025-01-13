@@ -3,6 +3,7 @@
 
 use super::{BlockMeta, FileObject, SsTable};
 use crate::key::KeyVec;
+use crate::table::bloom::Bloom;
 use crate::{block::BlockBuilder, key::KeySlice, lsm_storage::BlockCache};
 use anyhow::Result;
 use bytes::BufMut;
@@ -21,6 +22,7 @@ pub struct SsTableBuilder {
     data: Vec<u8>,
     pub(crate) meta: Vec<BlockMeta>,
     block_size: usize,
+    key_hashes: Vec<u32>,
 }
 
 impl SsTableBuilder {
@@ -33,6 +35,7 @@ impl SsTableBuilder {
             data: Vec::new(),
             meta: Vec::new(),
             block_size,
+            key_hashes: Vec::new(),
         }
     }
 
@@ -44,6 +47,7 @@ impl SsTableBuilder {
         if key.is_empty() {
             return;
         }
+        self.key_hashes.push(farmhash::fingerprint32(key.raw_ref()));
         if self.builder.add(key, value) {
             return;
         }
@@ -71,9 +75,21 @@ impl SsTableBuilder {
 
         let data_size = sst_build.data.len() as u64;
         let mut meta_data: Vec<u8> = Vec::new();
+
         BlockMeta::encode_block_meta(&sst_build.meta, &mut meta_data);
+
+        let keys = sst_build.key_hashes;
+        let bloom =
+            Bloom::build_from_key_hashes(&keys, Bloom::bloom_bits_per_key(keys.len(), 0.01));
+
+        let mut bloom_data = Vec::with_capacity(bloom.filter.len() + 1);
+        bloom.encode(&mut bloom_data);
+        let bloom_data_size = bloom_data.len() as u64;
+
         let meta_size = meta_data.len() as u64;
-        let file_size = data_size + meta_size + SIZEOF_U32 as u64;
+
+        // | data | meta_size meta | bloom_size bloom | meta_size |
+        let file_size = data_size + meta_size + bloom_data_size + SIZEOF_U32 as u64 * 3;
 
         let mut sst = SsTable::create_meta_only(
             id,
@@ -83,17 +99,28 @@ impl SsTableBuilder {
         );
 
         sst.block_cache = block_cache;
+
         sst.block_meta_offset = data_size as usize;
         sst.block_meta = sst_build.meta;
         sst.max_ts = 0;
+        sst.bloom = Some(bloom);
 
         let mut data = sst_build.data;
 
-        let meta_extra = (data_size as u32).to_be_bytes();
+        let meta_len = (meta_data.len() as u32).to_be_bytes();
+        data.put(&meta_len[..]);
         data.put(&*meta_data);
+
+        let bloom_len = (bloom_data.len() as u32).to_be_bytes();
+        data.put(&bloom_len[..]);
+        data.put(&*bloom_data);
+
+        let meta_extra = (data_size as u32).to_be_bytes();
         data.put(&meta_extra[..]);
+
         let file = FileObject::create(path.as_ref(), data)?;
         sst.file = file;
+
         Ok(sst)
     }
 

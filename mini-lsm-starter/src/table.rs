@@ -166,14 +166,24 @@ impl SsTable {
     /// Open SSTable from a file.
     pub fn open(id: usize, block_cache: Option<Arc<BlockCache>>, file: FileObject) -> Result<Self> {
         let file_size = file.size();
+        let u32_sizeof = SIZEOF_U32 as u64;
 
-        let meta_data_offset = file.read(file_size - SIZEOF_U32 as u64, SIZEOF_U32 as u64)?;
+        let meta_data_offset = file.read(file_size - u32_sizeof, u32_sizeof)?;
         let meta_data_offset = meta_data_offset.as_slice().get_u32() as u64;
-        let meta_data = file.read(
-            meta_data_offset,
-            file_size - meta_data_offset - SIZEOF_U32 as u64,
+
+        let meta_len = file.read(meta_data_offset, u32_sizeof)?;
+        let meta_len = meta_len.as_slice().get_u32() as usize as u64;
+        let meta_data = file.read(meta_data_offset + u32_sizeof, meta_len)?;
+
+        let bloom_len = file.read(meta_data_offset + u32_sizeof + meta_len, u32_sizeof)?;
+        let bloom_len = bloom_len.as_slice().get_u32() as usize as u64;
+        let bloom_data = file.read(
+            meta_data_offset + u32_sizeof + meta_len + u32_sizeof,
+            bloom_len,
         )?;
+
         let block_meta = BlockMeta::decode_block_meta(&*meta_data);
+        let bloom = Bloom::decode(&*bloom_data)?;
 
         let first_key = block_meta
             .first()
@@ -183,6 +193,7 @@ impl SsTable {
             .last()
             .map(|x| x.last_key.clone())
             .unwrap_or_default();
+
         Ok(Self {
             file,
             block_meta,
@@ -191,7 +202,7 @@ impl SsTable {
             block_cache,
             first_key,
             last_key,
-            bloom: None,
+            bloom: Some(bloom),
             max_ts: 0,
         })
     }
@@ -300,6 +311,14 @@ impl SsTable {
 
     pub fn get(&self, _key: &[u8]) -> Option<Bytes> {
         let key = KeySlice::from_slice(_key);
+
+        if let Some(bloom) = &self.bloom {
+            let hash = farmhash::fingerprint32(key.raw_ref());
+            if !bloom.may_contain(hash) {
+                return None;
+            }
+        }
+
         let idx = self.find_block_idx(key);
         let block = self.read_block_cached(idx).ok();
         if let Some(block) = block {
