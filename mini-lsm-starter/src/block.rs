@@ -72,8 +72,20 @@ impl Block {
         let key_begin = key_len_end;
         let key_end = key_begin + key_len;
 
-        let key = &entry[key_begin..key_end];
-        KeyVec::from_vec(key.to_vec())
+        if idx == 0 {
+            let key = &entry[key_begin..key_end];
+            return KeyVec::from_vec(key.to_vec());
+        }
+
+        let mut key = entry[key_begin..key_end].as_ref();
+        let overlap_len = key.get_u16() as usize;
+        let rest_len = key.get_u16() as usize;
+        let key = &key[..rest_len];
+        let first = self.first_key().clone();
+        let mut overlap: Vec<u8> = Vec::new();
+        overlap.put(&first.raw_ref()[..overlap_len]);
+        overlap.put(key);
+        KeyVec::from_vec(overlap.to_vec())
     }
 
     pub fn first_key(&self) -> KeyVec {

@@ -102,9 +102,10 @@ impl BlockIterator {
             self.value_range = (0, 0);
             return;
         }
-        let offset = self.block.offsets[idx] as usize;
 
+        let offset = self.block.offsets[idx] as usize;
         let entry = self.block.data[offset..].as_ref();
+        let key = self.block.get_key(idx);
 
         // 相对偏移量
         let key_len_begin = 0;
@@ -114,7 +115,7 @@ impl BlockIterator {
         let key_begin = key_len_end;
         let key_end = key_begin + key_len;
 
-        let key = entry[key_begin..key_end].as_ref();
+        // let key = entry[key_begin..key_end].as_ref();
 
         let value_len_begin = key_end;
         let value_len_end = value_len_begin + SIZEOF_U16;
@@ -123,7 +124,7 @@ impl BlockIterator {
         // 转换成绝对偏移量
         let value_begin = offset + value_len_end;
         self.value_range = (value_begin, value_begin + value_len);
-        self.key = KeyVec::from_vec(key.to_vec());
+        self.key = key;
         self.idx = idx;
     }
 }

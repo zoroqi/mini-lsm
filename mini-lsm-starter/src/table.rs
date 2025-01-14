@@ -183,7 +183,7 @@ impl SsTable {
         )?;
 
         let block_meta = BlockMeta::decode_block_meta(&*meta_data);
-        let bloom = Bloom::decode(&*bloom_data)?;
+        let bloom = Bloom::decode(&bloom_data)?;
 
         let first_key = block_meta
             .first()

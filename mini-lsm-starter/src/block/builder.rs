@@ -2,6 +2,7 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use crate::key::{KeySlice, KeyVec};
+use bytes::BufMut;
 
 use super::Block;
 
@@ -31,15 +32,26 @@ impl BlockBuilder {
     /// Adds a key-value pair to the block. Returns false when the block is full.
     #[must_use]
     pub fn add(&mut self, key: KeySlice, value: &[u8]) -> bool {
-        if key.is_empty() {
-            return false;
-        }
+        assert!(!key.is_empty(), "key must not be empty");
         let is_first = self.first_key.is_empty();
         if is_first {
             self.first_key = key.to_key_vec();
-            self.offsets.push(0)
+            self.offsets.push(0);
         }
-        let key = key.raw_ref();
+
+        let mut key = key;
+        let mut new_key = key.raw_ref().to_vec();
+        if !is_first {
+            let overlap_len = Self::compute_overlap(self.first_key.as_key_slice(), key);
+            let rest_len = key.len() - overlap_len;
+            let mut k = key.raw_ref();
+            k = &k[overlap_len..];
+            new_key = (overlap_len as u16).to_be_bytes().to_vec();
+            new_key.put_u16(rest_len as u16);
+            new_key.put(k);
+        }
+
+        key = KeySlice::from_slice(new_key.as_slice());
         let key_len = key.len();
         let value_len = value.len();
 
@@ -49,12 +61,10 @@ impl BlockBuilder {
         if !is_first && total_size >= self.block_size {
             return false;
         }
-        self.data
-            .extend_from_slice((key_len as u16).to_be_bytes().as_slice());
-        self.data.extend_from_slice(key);
-        self.data
-            .extend_from_slice((value_len as u16).to_be_bytes().as_slice());
-        self.data.extend_from_slice(value);
+        self.data.put_u16(key_len as u16);
+        self.data.put(key.raw_ref());
+        self.data.put_u16(value_len as u16);
+        self.data.put(value);
         self.offsets.push(new_offset as u16);
         true
     }
@@ -62,6 +72,14 @@ impl BlockBuilder {
     /// Check if there is no key-value pair in the block.
     pub fn is_empty(&self) -> bool {
         self.first_key.is_empty()
+    }
+
+    fn compute_overlap(a: KeySlice, b: KeySlice) -> usize {
+        a.raw_ref()
+            .iter()
+            .zip(b.raw_ref())
+            .take_while(|(a, b)| a == b)
+            .count()
     }
 
     /// Finalize the block.
