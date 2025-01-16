@@ -138,14 +138,14 @@ impl<I: StorageIterator> StorageIterator for FusedIterator<I> {
     }
 
     fn key(&self) -> Self::KeyType<'_> {
-        if self.has_errored {
+        if !self.is_valid() {
             panic!("Iterator has already errored");
         }
         self.iter.key()
     }
 
     fn value(&self) -> &[u8] {
-        if self.has_errored {
+        if !self.is_valid() {
             panic!("Iterator has already errored");
         }
         self.iter.value()
@@ -155,9 +155,11 @@ impl<I: StorageIterator> StorageIterator for FusedIterator<I> {
         if self.has_errored {
             bail!("Iterator has already errored");
         }
-        if let e @ Err(_) = self.iter.next() {
-            self.has_errored = true;
-            return e;
+        if self.iter.is_valid() {
+            if let e @ Err(_) = self.iter.next() {
+                self.has_errored = true;
+                return e;
+            }
         }
         Ok(())
     }

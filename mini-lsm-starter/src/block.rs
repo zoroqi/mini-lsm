@@ -6,10 +6,8 @@ mod iterator;
 
 use crate::key::KeyVec;
 pub use builder::BlockBuilder;
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes};
 pub use iterator::BlockIterator;
-use serde::__private::de::IdentifierDeserializer;
-use std::io::Read;
 
 pub(crate) const SIZEOF_U32: usize = std::mem::size_of::<u32>();
 pub(crate) const SIZEOF_U16: usize = std::mem::size_of::<u16>();
@@ -30,7 +28,6 @@ impl Block {
         }
         let size = self.offsets.len() as u32;
         result.put_u32(size);
-
         result.into()
     }
 
@@ -47,7 +44,7 @@ impl Block {
         let entry_size = (&data[len - SIZEOF_U32..]).get_u32() as usize;
         let offset_len = entry_size * SIZEOF_U16;
 
-        let offset = &data[len - SIZEOF_U32 - offset_len..len - SIZEOF_U32]
+        let offsets = &data[len - SIZEOF_U32 - offset_len..len - SIZEOF_U32]
             .chunks(SIZEOF_U16)
             .map(|mut x| x.get_u16())
             .collect::<Vec<u16>>();
@@ -55,7 +52,7 @@ impl Block {
         let entry = &data[..len - SIZEOF_U32 - offset_len];
         Self {
             data: entry.to_vec(),
-            offsets: offset.to_vec(),
+            offsets: offsets.to_vec(),
         }
     }
 }
@@ -72,19 +69,21 @@ impl Block {
         let key_begin = key_len_end;
         let key_end = key_begin + key_len;
 
+        let key = &entry[key_begin..key_end];
         if idx == 0 {
-            let key = &entry[key_begin..key_end];
             return KeyVec::from_vec(key.to_vec());
         }
 
-        let mut key = entry[key_begin..key_end].as_ref();
+        let mut key = key;
         let overlap_len = key.get_u16() as usize;
         let rest_len = key.get_u16() as usize;
         let key = &key[..rest_len];
         let first = self.first_key().clone();
         let mut overlap: Vec<u8> = Vec::new();
+
         overlap.put(&first.raw_ref()[..overlap_len]);
         overlap.put(key);
+
         KeyVec::from_vec(overlap.to_vec())
     }
 

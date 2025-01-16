@@ -50,13 +50,13 @@ impl BlockIterator {
 
     /// Returns the key of the current entry.
     pub fn key(&self) -> KeySlice {
-        debug_assert!(!self.key.is_empty(), "invalid iterator");
+        assert!(!self.key.is_empty(), "invalid iterator");
         self.key.as_key_slice()
     }
 
     /// Returns the value of the current entry.
     pub fn value(&self) -> &[u8] {
-        debug_assert!(!self.key.is_empty(), "invalid iterator");
+        assert!(!self.key.is_empty(), "invalid iterator");
         &self.block.data[self.value_range.0..self.value_range.1]
     }
 

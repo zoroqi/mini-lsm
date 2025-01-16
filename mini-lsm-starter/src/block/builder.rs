@@ -24,7 +24,7 @@ impl BlockBuilder {
         Self {
             offsets: Vec::new(),
             data: Vec::new(),
-            block_size: block_size,
+            block_size,
             first_key: KeyVec::new(),
         }
     }

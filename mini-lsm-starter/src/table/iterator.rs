@@ -71,7 +71,7 @@ impl StorageIterator for SsTableIterator {
 
     /// Return the `key` that's held by the underlying block iterator.
     fn key(&self) -> KeySlice {
-        debug_assert!(
+        assert!(
             self.blk_idx < self.table.num_of_blocks(),
             "invalid iterator"
         );
@@ -80,7 +80,7 @@ impl StorageIterator for SsTableIterator {
 
     /// Return the `value` that's held by the underlying block iterator.
     fn value(&self) -> &[u8] {
-        debug_assert!(
+        assert!(
             self.blk_idx < self.table.num_of_blocks(),
             "invalid iterator"
         );
