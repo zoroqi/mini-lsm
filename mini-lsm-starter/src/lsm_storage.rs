@@ -471,7 +471,6 @@ impl LsmStorageInner {
                 _ => SsTableIterator::create_and_seek_to_first(sst),
             })
             .collect::<Result<Vec<SsTableIterator>>>();
-        // .collect::<Vec<_>>();
 
         if sst.is_err() {
             return Err(sst.err().unwrap());
