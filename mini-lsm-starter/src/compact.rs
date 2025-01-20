@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::iterators::StorageIterator;
@@ -131,16 +132,15 @@ impl LsmStorageInner {
                     l0_sst.push(iter);
                 }
 
-                let mut l1_sst: Vec<SsTableIterator> = Vec::with_capacity(l1_sstables.len());
+                let mut l1_sst: Vec<Arc<SsTable>> = Vec::with_capacity(l1_sstables.len());
                 for &id in l1_sstables.iter() {
                     let sst = snapshot.sstables[&id].clone();
-                    let iter = SsTableIterator::create_and_seek_to_first(sst)?;
-                    l1_sst.push(iter);
+                    l1_sst.push(sst);
                 }
 
                 let mut iter = TwoMergeIterator::create(
                     MergeIterator::create(l0_sst.into_iter().map(Box::new).collect()),
-                    MergeIterator::create(l1_sst.into_iter().map(Box::new).collect()),
+                    SstConcatIterator::create_and_seek_to_first(l1_sst)?,
                 )?;
 
                 let mut result: Vec<Arc<SsTable>> = Vec::new();
@@ -195,6 +195,14 @@ impl LsmStorageInner {
         {
             let _state_lock = self.state_lock.lock();
             let mut state = self.state.write().as_ref().clone();
+
+            // let mut l0_sstables_map = l0.iter().copied().collect::<HashSet<_>>();
+            // state.l0_sstables = state
+            //     .l0_sstables
+            //     .iter()
+            //     .filter(|x| !l0_sstables_map.remove(x))
+            //     .copied()
+            //     .collect::<Vec<_>>();
 
             let new_sst_ids: Vec<usize> = new_ssts.iter().map(|sst| sst.sst_id()).collect();
             if let Some(begin) = begin_sst_id {
