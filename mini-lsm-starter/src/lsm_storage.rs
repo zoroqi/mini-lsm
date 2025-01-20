@@ -8,15 +8,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
-use anyhow::Result;
-use bytes::Bytes;
-use parking_lot::{Mutex, MutexGuard, RwLock};
-
 use crate::block::Block;
 use crate::compact::{
     CompactionController, CompactionOptions, LeveledCompactionController, LeveledCompactionOptions,
     SimpleLeveledCompactionController, SimpleLeveledCompactionOptions, TieredCompactionController,
 };
+use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::iterators::StorageIterator;
@@ -26,6 +23,9 @@ use crate::manifest::Manifest;
 use crate::mem_table::MemTable;
 use crate::mvcc::LsmMvccInner;
 use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
+use anyhow::Result;
+use bytes::Bytes;
+use parking_lot::{Mutex, MutexGuard, RwLock};
 
 pub type BlockCache = moka::sync::Cache<(usize, usize), Arc<Block>>;
 
@@ -308,16 +308,22 @@ impl LsmStorageInner {
                 .find_map(|v| v);
         }
 
+        let sst_get = |sst_ids: Vec<usize>| -> Option<Bytes> {
+            sst_ids
+                .iter()
+                .filter_map(|id| state.sstables.get(id))
+                .find_map(|sst| sst.get(_key))
+        };
+
         if value.is_none() {
-            for id in &state.l0_sstables {
-                if let Some(sst) = state.sstables.get(id) {
-                    let v = sst.get(_key);
-                    if v.is_some() {
-                        value = v;
-                        break;
-                    }
-                }
-            }
+            value = sst_get(state.l0_sstables.clone());
+        }
+
+        if value.is_none() {
+            value = state
+                .levels
+                .iter()
+                .find_map(|(_, level)| sst_get(level.clone()));
         }
 
         value
@@ -448,7 +454,7 @@ impl LsmStorageInner {
 
         let mem_iter = MergeIterator::create(mem.into_iter().map(Box::new).collect());
 
-        let sst = snapshot
+        let level0_sst = snapshot
             .l0_sstables
             .iter()
             .map(|id| snapshot.sstables[id].clone())
@@ -472,13 +478,27 @@ impl LsmStorageInner {
             })
             .collect::<Result<Vec<SsTableIterator>>>();
 
-        if sst.is_err() {
-            return Err(sst.err().unwrap());
+        if level0_sst.is_err() {
+            return Err(level0_sst.err().unwrap());
         }
 
-        let sst_iter = MergeIterator::create(sst?.into_iter().map(Box::new).collect());
-        let inner = TwoMergeIterator::create(mem_iter, sst_iter)?;
+        let mut level_iters = Vec::with_capacity(snapshot.levels.len());
+        for (_, level) in &snapshot.levels {
+            let sst = level
+                .iter()
+                .map(|id| snapshot.sstables[id].clone())
+                .filter(|sst| Self::range_overlap(_lower, _upper, sst.clone()))
+                .collect::<Vec<Arc<SsTable>>>();
 
+            let iter = SstConcatIterator::create_and_seek_to_first(sst)?;
+            level_iters.push(Box::new(iter));
+        }
+
+        let level0_iter = MergeIterator::create(level0_sst?.into_iter().map(Box::new).collect());
+        let mem_level0 = TwoMergeIterator::create(mem_iter, level0_iter)?;
+
+        let level_concat_iter = MergeIterator::create(level_iters);
+        let inner = TwoMergeIterator::create(mem_level0, level_concat_iter)?;
         LsmIterator::new(inner, _lower, _upper).map(FusedIterator::new)
     }
 

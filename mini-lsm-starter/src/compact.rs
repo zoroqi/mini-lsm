@@ -181,13 +181,13 @@ impl LsmStorageInner {
         let (l0, l1) = {
             let state = self.state.read();
             let l0 = state.l0_sstables.clone();
-            let l1 = state.levels.get(0).unwrap_or(&(0, vec![])).1.clone();
+            let l1 = state.levels.first().unwrap_or(&(0, vec![])).1.clone();
             (l0, l1)
         };
         if l0.is_empty() && l1.is_empty() {
             return Ok(());
         }
-        let begin_sst_id = l0.get(0).copied();
+        let begin_sst_id = l0.first().copied();
         let new_ssts = self.compact(&CompactionTask::ForceFullCompaction {
             l0_sstables: l0.clone(),
             l1_sstables: l1.clone(),
@@ -205,21 +205,20 @@ impl LsmStorageInner {
             //     .collect::<Vec<_>>();
 
             let new_sst_ids: Vec<usize> = new_ssts.iter().map(|sst| sst.sst_id()).collect();
+            for sst in new_ssts {
+                state.sstables.insert(sst.sst_id(), sst.clone());
+            }
+            if !state.levels.is_empty() {
+                state.levels[0].1 = new_sst_ids;
+            } else {
+                state.levels.push((0, new_sst_ids));
+            }
             if let Some(begin) = begin_sst_id {
                 if let Some(i0) = state.l0_sstables.iter().position(|&id| id == begin) {
                     state.l0_sstables = state.l0_sstables[..i0].to_vec();
                 }
             }
 
-            for sst in new_ssts {
-                state.sstables.insert(sst.sst_id(), sst.clone());
-            }
-
-            if !state.levels.is_empty() {
-                state.levels[0].1 = new_sst_ids;
-            } else {
-                state.levels.push((0, new_sst_ids));
-            }
             *self.state.write() = Arc::new(state);
         };
         Ok(())
