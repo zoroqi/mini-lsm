@@ -345,10 +345,10 @@ impl LsmStorageInner {
             result = state.memtable.put(_key, _value);
             state.memtable.approximate_size()
         };
-        if new_size >= self.options.num_memtable_limit {
+        if new_size >= self.options.target_sst_size {
             let lock = self.state_lock.lock();
             let size = self.state.read().memtable.approximate_size();
-            if size >= self.options.num_memtable_limit {
+            if size >= self.options.target_sst_size {
                 self.force_freeze_memtable(&lock)?;
             }
         }
@@ -407,7 +407,7 @@ impl LsmStorageInner {
                 .clone();
         };
         let mut builder = SsTableBuilder::new(self.options.block_size);
-        let _ = memtable.flush(&mut builder);
+        memtable.flush(&mut builder)?;
         let sst_id = memtable.id();
         let sst = builder.build(
             sst_id,
@@ -418,7 +418,8 @@ impl LsmStorageInner {
         {
             let mut state = self.state.write();
             let mut guard = state.as_ref().clone();
-            guard.imm_memtables.pop();
+            let mem = guard.imm_memtables.pop().unwrap();
+            assert_eq!(mem.id(), sst_id);
             guard.sstables.insert(sst_id, Arc::new(sst));
             guard.l0_sstables.insert(0, sst_id);
             *state = Arc::new(guard);

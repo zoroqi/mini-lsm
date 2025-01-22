@@ -105,6 +105,6 @@ impl StorageIterator for SstConcatIterator {
     }
 
     fn num_active_iterators(&self) -> usize {
-        self.sstables.len() - self.next_sst_idx + 1
+        1
     }
 }

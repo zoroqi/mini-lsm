@@ -38,7 +38,6 @@ impl SimpleLeveledCompactionController {
         if self.options.max_levels == 0 {
             return None;
         }
-        println!("l0_sstables_len {}, max:{}", _snapshot.l0_sstables.len(), self.options.level0_file_num_compaction_trigger);
         let l0 = _snapshot.l0_sstables.len();
         if l0 >= self.options.level0_file_num_compaction_trigger {
             return Some(SimpleLeveledCompactionTask {
@@ -53,14 +52,17 @@ impl SimpleLeveledCompactionController {
             let l_upper = _snapshot.levels[i].1.len();
             let l_lower = _snapshot.levels[i + 1].1.len();
             let ratio = (l_lower as f64 / l_upper as f64) * 100.0;
-            println!("l_upper {} l_lower {} ratio {} size_ratio {}", l_upper, l_lower, ratio, self.options.size_ratio_percent);
-            if ratio < self.options.size_ratio_percent as f64{
+            println!(
+                "l_upper {} l_lower {} ratio {} size_ratio {}",
+                l_upper, l_lower, ratio, self.options.size_ratio_percent
+            );
+            if ratio < self.options.size_ratio_percent as f64 {
                 return Some(SimpleLeveledCompactionTask {
-                    upper_level: Some(i+1),
+                    upper_level: Some(i + 1),
                     upper_level_sst_ids: _snapshot.levels[i].1.clone(),
                     lower_level: i + 2,
                     lower_level_sst_ids: _snapshot.levels[i + 1].1.clone(),
-                    is_lower_level_bottom_level: l_upper == self.options.max_levels-1,
+                    is_lower_level_bottom_level: l_upper == self.options.max_levels - 1,
                 });
             }
         }
@@ -84,7 +86,11 @@ impl SimpleLeveledCompactionController {
         let mut remove_sst_ids = Vec::new();
         if _task.upper_level.is_none() {
             remove_sst_ids.extend(_task.upper_level_sst_ids.clone());
-            let mut l0_sstables_map = snapshot.l0_sstables.iter().copied().collect::<HashSet<_>>();
+            let mut l0_sstables_map = _task
+                .upper_level_sst_ids
+                .iter()
+                .copied()
+                .collect::<HashSet<_>>();
             snapshot.l0_sstables = snapshot
                 .l0_sstables
                 .iter()
