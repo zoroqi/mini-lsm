@@ -310,6 +310,9 @@ impl SsTable {
     }
 
     pub fn get(&self, _key: &[u8]) -> Option<Bytes> {
+        if self.first_key().raw_ref() > _key || self.last_key().raw_ref() < _key {
+            return None;
+        }
         let key = KeySlice::from_slice(_key);
 
         if let Some(bloom) = &self.bloom {
