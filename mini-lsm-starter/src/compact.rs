@@ -164,6 +164,16 @@ impl LsmStorageInner {
                     self.compact_new_sst(iter)
                 }
             }
+            CompactionTask::Tiered(task) => {
+                let iters: Vec<SstConcatIterator> = task
+                    .tiers
+                    .iter()
+                    .map(|(_, ids)| build_concat(ids.clone()))
+                    .collect::<Result<_>>()?;
+
+                let iter = MergeIterator::create(iters.into_iter().map(Box::new).collect());
+                self.compact_new_sst(iter)
+            }
             _ => Ok(vec![]),
         }
     }

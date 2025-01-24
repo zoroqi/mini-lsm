@@ -421,7 +421,11 @@ impl LsmStorageInner {
             let mem = guard.imm_memtables.pop().unwrap();
             assert_eq!(mem.id(), sst_id);
             guard.sstables.insert(sst_id, Arc::new(sst));
-            guard.l0_sstables.insert(0, sst_id);
+            if self.compaction_controller.flush_to_l0() {
+                guard.l0_sstables.insert(0, sst_id);
+            } else {
+                guard.levels.insert(0, (sst_id, vec![sst_id]));
+            }
             *state = Arc::new(guard);
         }
 
