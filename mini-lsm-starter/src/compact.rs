@@ -174,7 +174,19 @@ impl LsmStorageInner {
                 let iter = MergeIterator::create(iters.into_iter().map(Box::new).collect());
                 self.compact_new_sst(iter)
             }
-            _ => Ok(vec![]),
+            CompactionTask::Leveled(task) => {
+                if task.upper_level.is_some() {
+                    let up_iter = build_concat(task.upper_level_sst_ids.clone())?;
+                    let low_iter = build_concat(task.lower_level_sst_ids.clone())?;
+                    let iter = TwoMergeIterator::create(up_iter, low_iter)?;
+                    self.compact_new_sst(iter)
+                } else {
+                    let up_iter = build_sst(task.upper_level_sst_ids.clone())?;
+                    let low_iter = build_concat(task.lower_level_sst_ids.clone())?;
+                    let iter = TwoMergeIterator::create(up_iter, low_iter)?;
+                    self.compact_new_sst(iter)
+                }
+            }
         }
     }
 
