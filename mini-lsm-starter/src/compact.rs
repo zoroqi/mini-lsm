@@ -14,6 +14,7 @@ use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::iterators::StorageIterator;
 use crate::key::KeySlice;
 use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
+use crate::manifest::ManifestRecord;
 use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 use anyhow::Result;
 pub use leveled::{LeveledCompactionController, LeveledCompactionOptions, LeveledCompactionTask};
@@ -269,12 +270,17 @@ impl LsmStorageInner {
                 new_ids.as_slice(),
                 false,
             );
+
             let mut remove_sst = Vec::with_capacity(remove_ids.len());
 
             for id in remove_ids {
                 let result = state.sstables.remove(&id);
                 assert!(result.is_some(), "cannot remove {}.sst", id);
                 remove_sst.push(result.unwrap());
+            }
+
+            if let Some(m) = &self.manifest {
+                m.add_record(&_state_lock, ManifestRecord::Compaction(task, new_ids))?;
             }
 
             *self.state.write() = Arc::new(state);

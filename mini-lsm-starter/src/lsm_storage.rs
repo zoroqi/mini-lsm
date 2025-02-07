@@ -19,7 +19,7 @@ use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::iterators::StorageIterator;
 use crate::key::KeySlice;
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
-use crate::manifest::Manifest;
+use crate::manifest::{Manifest, ManifestRecord};
 use crate::mem_table::MemTable;
 use crate::mvcc::LsmMvccInner;
 use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
@@ -165,6 +165,11 @@ impl MiniLsm {
         if let Some(handle) = lock.take() {
             handle.join().map_err(|e| anyhow::anyhow!("{:?}", e))?;
         }
+        self.compaction_notifier.send(())?;
+        let mut lock = self.compaction_thread.lock();
+        if let Some(handle) = lock.take() {
+            handle.join().map_err(|e| anyhow::anyhow!("{:?}", e))?;
+        }
         Ok(())
     }
 
@@ -271,6 +276,8 @@ impl LsmStorageInner {
             CompactionOptions::NoCompaction => CompactionController::NoCompaction,
         };
 
+        let manifest = Manifest::recover(path.join("MANIFEST"))?;
+
         let storage = Self {
             state: Arc::new(RwLock::new(Arc::new(state))),
             state_lock: Mutex::new(()),
@@ -278,7 +285,7 @@ impl LsmStorageInner {
             block_cache: Arc::new(BlockCache::new(1024)),
             next_sst_id: AtomicUsize::new(1),
             compaction_controller,
-            manifest: None,
+            manifest: Some(manifest.0),
             options: options.into(),
             mvcc: None,
             compaction_filters: Arc::new(Mutex::new(Vec::new())),
@@ -426,6 +433,11 @@ impl LsmStorageInner {
             } else {
                 guard.levels.insert(0, (sst_id, vec![sst_id]));
             }
+
+            if let Some(m) = &self.manifest {
+                m.add_record(&_lock, ManifestRecord::Flush(sst_id))?;
+            }
+
             *state = Arc::new(guard);
         }
 
