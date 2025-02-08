@@ -27,7 +27,6 @@ impl Manifest {
             file: Arc::new(Mutex::new(
                 OpenOptions::new()
                     .create_new(true)
-                    .write(true)
                     .read(true)
                     .append(true)
                     .open(_path)
@@ -38,7 +37,7 @@ impl Manifest {
 
     pub fn recover(_path: impl AsRef<Path>) -> Result<(Self, Vec<ManifestRecord>)> {
         let mut file = OpenOptions::new()
-            .write(true)
+            .create(true)
             .read(true)
             .append(true)
             .open(_path)

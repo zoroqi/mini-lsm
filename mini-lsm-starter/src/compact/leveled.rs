@@ -1,5 +1,4 @@
 use crate::lsm_storage::LsmStorageState;
-use nom::character::complete::u64;
 use serde::{Deserialize, Serialize};
 use std::cmp::max;
 use std::collections::HashSet;
@@ -157,7 +156,6 @@ impl LeveledCompactionController {
         }
         let lower = _task.lower_level - 1;
         let mut new_lower_level_ssts = remove(snapshot.levels[lower].1.clone());
-
         assert!(remove_ids_set.is_empty());
 
         new_lower_level_ssts.extend(_output);

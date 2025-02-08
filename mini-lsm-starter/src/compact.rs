@@ -218,14 +218,14 @@ impl LsmStorageInner {
                 .copied()
                 .collect::<Vec<_>>();
 
-            let new_sst_ids: Vec<usize> = new_ssts.iter().map(|sst| sst.sst_id()).collect();
+            let new_ids: Vec<usize> = new_ssts.iter().map(|sst| sst.sst_id()).collect();
             for sst in new_ssts {
                 state.sstables.insert(sst.sst_id(), sst.clone());
             }
             if !state.levels.is_empty() {
-                state.levels[0].1 = new_sst_ids;
+                state.levels[0].1 = new_ids.clone();
             } else {
-                state.levels.push((0, new_sst_ids));
+                state.levels.push((0, new_ids.clone()));
             }
 
             for id in l0.iter().chain(l1.iter()) {
@@ -236,8 +236,13 @@ impl LsmStorageInner {
             for &id in l0.iter().chain(l1.iter()) {
                 std::fs::remove_file(self.path_of_sst(id))?;
             }
+            if let Some(m) = &self.manifest {
+                m.add_record(&_state_lock, ManifestRecord::Compaction(task, new_ids))?;
+            }
             *self.state.write() = Arc::new(state);
         };
+
+        self.sync_dir()?;
         Ok(())
     }
 
@@ -278,11 +283,9 @@ impl LsmStorageInner {
                 assert!(result.is_some(), "cannot remove {}.sst", id);
                 remove_sst.push(result.unwrap());
             }
-
             if let Some(m) = &self.manifest {
                 m.add_record(&_state_lock, ManifestRecord::Compaction(task, new_ids))?;
             }
-
             *self.state.write() = Arc::new(state);
 
             remove_sst
@@ -291,6 +294,7 @@ impl LsmStorageInner {
         for sst in remove_sst {
             std::fs::remove_file(self.path_of_sst(sst.sst_id()))?;
         }
+        self.sync_dir()?;
 
         Ok(())
     }
