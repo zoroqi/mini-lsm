@@ -23,7 +23,7 @@ use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 pub use builder::SsTableBuilder;
 use bytes::{Buf, BufMut, Bytes};
 pub use iterator::SsTableIterator;
@@ -184,17 +184,34 @@ impl SsTable {
 
         let meta_data_offset = file.read(file_size - u32_sizeof, u32_sizeof)?;
         let meta_data_offset = meta_data_offset.as_slice().get_u32() as u64;
+        let offset = meta_data_offset;
+        let _id = file.read(offset, u32_sizeof)?;
+        let _id = _id.as_slice().get_u32() as usize;
+        if _id != id {
+            bail!("id mismatch");
+        }
 
-        let meta_len = file.read(meta_data_offset, u32_sizeof)?;
+        let offset = offset + u32_sizeof;
+
+        let meta_len = file.read(offset, u32_sizeof)?;
         let meta_len = meta_len.as_slice().get_u32() as usize as u64;
-        let meta_data = file.read(meta_data_offset + u32_sizeof, meta_len)?;
+        let meta_data = file.read(offset + u32_sizeof, meta_len)?;
+        let meta_checksum = file.read(offset + u32_sizeof + meta_len, u32_sizeof)?;
 
-        let bloom_len = file.read(meta_data_offset + u32_sizeof + meta_len, u32_sizeof)?;
+        let meta_checksum = meta_checksum.as_slice().get_u32();
+        if meta_checksum != crc32fast::hash(&meta_data) {
+            bail!("meta checksum mismatch");
+        }
+
+        let offset = offset + u32_sizeof + meta_len + u32_sizeof;
+        let bloom_len = file.read(offset, u32_sizeof)?;
         let bloom_len = bloom_len.as_slice().get_u32() as usize as u64;
-        let bloom_data = file.read(
-            meta_data_offset + u32_sizeof + meta_len + u32_sizeof,
-            bloom_len,
-        )?;
+        let bloom_data = file.read(offset + u32_sizeof, bloom_len)?;
+        let bloom_checksum = file.read(offset + u32_sizeof + bloom_len, u32_sizeof)?;
+        let bloom_checksum = bloom_checksum.as_slice().get_u32();
+        if bloom_checksum != crc32fast::hash(&bloom_data) {
+            bail!("bloom checksum mismatch");
+        }
 
         let block_meta = BlockMeta::decode_block_meta(&*meta_data);
         let bloom = Bloom::decode(&bloom_data)?;
@@ -251,10 +268,15 @@ impl SsTable {
             self.block_meta[block_idx + 1].offset
         } else {
             self.block_meta_offset
-        };
+        } - SIZEOF_U32;
+
         let meta = &self.block_meta[block_idx];
         let data = self.file.read(begin as u64, (end - begin) as u64)?;
-
+        let checksum = self.file.read(end as u64, SIZEOF_U32 as u64)?;
+        let checksum = checksum.as_slice().get_u32();
+        if checksum != crc32fast::hash(&data) {
+            bail!("block checksum mismatch");
+        }
         Ok(Arc::new(Block::decode(&data)))
     }
 

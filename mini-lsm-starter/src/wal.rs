@@ -19,9 +19,10 @@ use std::io::{BufWriter, Read, Write};
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use bytes::{Buf, BufMut, Bytes};
 use crossbeam_skiplist::SkipMap;
+use nom::AsBytes;
 use parking_lot::Mutex;
 
 pub struct Wal {
@@ -54,7 +55,7 @@ impl Wal {
         file.read_to_end(&mut contents)?;
         let mut read = &*contents;
         while read.has_remaining() {
-            let (key, value) = Self::decode(&mut read);
+            let (key, value) = Self::decode(&mut read)?;
             _skiplist.insert(key, value);
         }
 
@@ -67,22 +68,37 @@ impl Wal {
     pub fn put(&self, _key: &[u8], _value: &[u8]) -> Result<()> {
         let key_len = _key.len() as u32;
         let value_len = _value.len() as u32;
-        let mut record: Vec<u8> = Vec::with_capacity(8 + key_len as usize + value_len as usize);
+        let mut hasher = crc32fast::Hasher::new();
+        hasher.update(_key);
+        hasher.update(_value);
+        let checksum = hasher.finalize();
+        let mut record: Vec<u8> = Vec::with_capacity(12 + key_len as usize + value_len as usize);
         record.put_u32(key_len);
         record.put(_key);
         record.put_u32(value_len);
         record.put(_value);
+        record.put_u32(checksum);
         let mut file = self.file.lock();
         file.write_all(&record)?;
         Ok(())
     }
 
-    fn decode(mut record: impl Buf) -> (Bytes, Bytes) {
+    fn decode(mut record: impl Buf) -> Result<(Bytes, Bytes)> {
         let key_len = record.get_u32() as usize;
         let key = record.copy_to_bytes(key_len);
         let value_len = record.get_u32() as usize;
         let value = record.copy_to_bytes(value_len);
-        (key, value)
+        let checksum = record.get_u32();
+
+        let mut hasher = crc32fast::Hasher::new();
+        hasher.update(key.as_bytes());
+        hasher.update(value.as_bytes());
+        let crc32 = hasher.finalize();
+
+        if crc32 != checksum {
+            bail!("checksum mismatch");
+        }
+        Ok((key, value))
     }
 
     /// Implement this in week 3, day 5.

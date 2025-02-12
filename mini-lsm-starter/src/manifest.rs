@@ -21,7 +21,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::compact::CompactionTask;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
+use bytes::{Buf, BufMut};
 use parking_lot::{Mutex, MutexGuard};
 use serde::{Deserialize, Serialize};
 
@@ -59,11 +60,17 @@ impl Manifest {
             .context("Failed to create manifest file")?;
         let mut contents = Vec::new();
         file.read_to_end(&mut contents)?;
-        let json = serde_json::Deserializer::from_slice(contents.as_slice());
-        let stream = json.into_iter::<ManifestRecord>();
+        let mut read = &*contents;
         let mut records: Vec<ManifestRecord> = Vec::new();
-        for record in stream {
-            records.push(record?);
+        while read.has_remaining() {
+            let len = read.get_u32();
+            let json = read.copy_to_bytes(len as usize);
+            let checksum = read.get_u32();
+            if checksum != crc32fast::hash(&json) {
+                bail!("checksum mismatch");
+            }
+            let record: ManifestRecord = serde_json::from_slice(&json)?;
+            records.push(record);
         }
         Ok((
             Self {
@@ -83,8 +90,16 @@ impl Manifest {
 
     pub fn add_record_when_init(&self, _record: ManifestRecord) -> Result<()> {
         let json_str = serde_json::to_vec(&_record)?;
+        let len = json_str.len() as u32;
+        let checksum = crc32fast::hash(&json_str);
+
+        let mut record: Vec<u8> = Vec::with_capacity(8 + len as usize);
+        record.put_u32(len);
+        record.put(&*json_str);
+        record.put_u32(checksum);
+
         let mut lock = self.file.lock();
-        lock.write_all(&json_str)?;
+        lock.write_all(&record)?;
         lock.sync_data()?;
         Ok(())
     }

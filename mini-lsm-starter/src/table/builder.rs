@@ -105,7 +105,7 @@ impl SsTableBuilder {
 
         let meta_size = meta_data.len() as u64;
 
-        // | data | meta_size meta | bloom_size bloom | meta_size |
+        // | data | meta_size | meta | bloom_size | bloom | meta_extra_size | meta_extra |
         let file_size = data_size + meta_size + bloom_data_size + SIZEOF_U32 as u64 * 3;
 
         let mut sst = SsTable::create_meta_only(
@@ -123,17 +123,22 @@ impl SsTableBuilder {
         sst.bloom = Some(bloom);
 
         let mut data = sst_build.data;
+        data.put_u32(id as u32);
 
-        let meta_len = (meta_data.len() as u32).to_be_bytes();
-        data.put(&meta_len[..]);
+        let meta_len = meta_data.len() as u32;
+        data.put_u32(meta_len);
         data.put(&*meta_data);
+        let meta_checksum = crc32fast::hash(&meta_data);
+        data.put_u32(meta_checksum);
 
-        let bloom_len = (bloom_data.len() as u32).to_be_bytes();
-        data.put(&bloom_len[..]);
+        let bloom_len = bloom_data.len() as u32;
+        data.put_u32(bloom_len);
         data.put(&*bloom_data);
+        let bloom_checksum = crc32fast::hash(&bloom_data);
+        data.put_u32(bloom_checksum);
 
-        let meta_extra = (data_size as u32).to_be_bytes();
-        data.put(&meta_extra[..]);
+        let meta_extra = data_size as u32;
+        data.put_u32(meta_extra);
 
         let file = FileObject::create(path.as_ref(), data)?;
         sst.file = file;
@@ -164,6 +169,8 @@ impl SsTableBuilder {
 
         self.meta.push(meta);
         let data = block.encode();
-        self.data.extend_from_slice(data.as_ref());
+        let date_checksum = crc32fast::hash(&data);
+        self.data.put(data);
+        self.data.put_u32(date_checksum);
     }
 }
