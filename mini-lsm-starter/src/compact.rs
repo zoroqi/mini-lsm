@@ -253,11 +253,11 @@ impl LsmStorageInner {
             }
             if let Some(m) = &self.manifest {
                 m.add_record(&_state_lock, ManifestRecord::Compaction(task, new_ids))?;
+                self.sync_dir()?;
             }
             *self.state.write() = Arc::new(state);
         };
 
-        self.sync_dir()?;
         Ok(())
     }
 
@@ -300,6 +300,7 @@ impl LsmStorageInner {
             }
             if let Some(m) = &self.manifest {
                 m.add_record(&_state_lock, ManifestRecord::Compaction(task, new_ids))?;
+                self.sync_dir()?;
             }
             *self.state.write() = Arc::new(state);
 
@@ -309,7 +310,6 @@ impl LsmStorageInner {
         for sst in remove_sst {
             std::fs::remove_file(self.path_of_sst(sst.sst_id()))?;
         }
-        self.sync_dir()?;
 
         Ok(())
     }

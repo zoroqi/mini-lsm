@@ -29,7 +29,7 @@ pub struct Manifest {
     file: Arc<Mutex<File>>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum ManifestRecord {
     Flush(usize),
     NewMemtable(usize),
