@@ -29,14 +29,14 @@ use bytes::{Buf, BufMut, Bytes};
 pub use iterator::SsTableIterator;
 
 use crate::block::{Block, BlockIterator};
-use crate::key::{KeyBytes, KeySlice};
+use crate::key::{KeyBytes, KeySlice, TS_RANGE_BEGIN};
 use crate::lsm_storage::BlockCache;
 
 use self::bloom::Bloom;
 
-pub(crate) const SIZEOF_U64: usize = std::mem::size_of::<u64>();
-pub(crate) const SIZEOF_U32: usize = std::mem::size_of::<u32>();
-pub(crate) const SIZEOF_U16: usize = std::mem::size_of::<u16>();
+pub(crate) const SIZEOF_U64: usize = size_of::<u64>();
+pub(crate) const SIZEOF_U32: usize = size_of::<u32>();
+pub(crate) const SIZEOF_U16: usize = size_of::<u16>();
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockMeta {
@@ -66,10 +66,14 @@ impl BlockMeta {
     fn encode(&self) -> Vec<u8> {
         let mut buf = Vec::new();
         buf.put_u64(self.offset as u64);
-        buf.put_u16(self.first_key.len() as u16);
-        buf.put(self.first_key.raw_ref());
-        buf.put_u16(self.last_key.len() as u16);
-        buf.put(self.last_key.raw_ref());
+
+        buf.put_u16(self.first_key.key_len() as u16);
+        buf.put(self.first_key.key_ref());
+        buf.put_u64(self.first_key.ts());
+
+        buf.put_u16(self.last_key.key_len() as u16);
+        buf.put(self.last_key.key_ref());
+        buf.put_u64(self.last_key.ts());
         buf
     }
 
@@ -97,9 +101,13 @@ impl BlockMeta {
     fn decode(mut buf: impl Buf) -> Self {
         let offset = buf.get_u64() as usize;
         let first_key_len = buf.get_u16() as usize;
-        let first_key = KeyBytes::from_bytes(buf.copy_to_bytes(first_key_len));
+        let first_key = buf.copy_to_bytes(first_key_len);
+        let first_key_ts = buf.get_u64();
+        let first_key = KeyBytes::from_bytes_with_ts(first_key, first_key_ts);
         let last_key_len = buf.get_u16() as usize;
-        let last_key = KeyBytes::from_bytes(buf.copy_to_bytes(last_key_len));
+        let last_key = buf.copy_to_bytes(last_key_len);
+        let last_key_ts = buf.get_u64();
+        let last_key = KeyBytes::from_bytes_with_ts(last_key, last_key_ts);
         Self {
             offset,
             first_key,
@@ -346,13 +354,13 @@ impl SsTable {
     }
 
     pub fn get(&self, _key: &[u8]) -> Option<Bytes> {
-        if self.first_key().raw_ref() > _key || self.last_key().raw_ref() < _key {
+        if self.first_key().key_ref() > _key || self.last_key().key_ref() < _key {
             return None;
         }
-        let key = KeySlice::from_slice(_key);
+        let key = KeySlice::from_slice(_key, 0); // TODO 处理时间
 
         if let Some(bloom) = &self.bloom {
-            let hash = farmhash::fingerprint32(key.raw_ref());
+            let hash = farmhash::fingerprint32(key.key_ref());
             if !bloom.may_contain(hash) {
                 return None;
             }

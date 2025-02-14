@@ -32,7 +32,7 @@ use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::iterators::StorageIterator;
-use crate::key::KeySlice;
+use crate::key::{KeySlice, TS_DEFAULT, TS_RANGE_BEGIN};
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::{Manifest, ManifestRecord};
 use crate::mem_table::MemTable;
@@ -529,15 +529,18 @@ impl LsmStorageInner {
             .map(|id| snapshot.sstables[id].clone())
             .filter(|sst| Self::range_overlap(_lower, _upper, sst.clone()))
             .map(|sst| match _lower {
-                Included(key) => {
-                    SsTableIterator::create_and_seek_to_key(sst, KeySlice::from_slice(key))
-                }
+                Included(key) => SsTableIterator::create_and_seek_to_key(
+                    sst,
+                    KeySlice::from_slice(key, TS_DEFAULT),
+                ),
                 Excluded(key) => {
-                    let mut iter =
-                        SsTableIterator::create_and_seek_to_key(sst, KeySlice::from_slice(key));
+                    let mut iter = SsTableIterator::create_and_seek_to_key(
+                        sst,
+                        KeySlice::from_slice(key, TS_DEFAULT),
+                    );
                     if iter.is_ok() {
                         let i = iter.as_mut().unwrap();
-                        if i.is_valid() && i.key().raw_ref() <= key {
+                        if i.is_valid() && i.key().key_ref() <= key {
                             let _ = i.next();
                         }
                     }
@@ -572,8 +575,8 @@ impl LsmStorageInner {
     }
 
     fn range_overlap(_lower: Bound<&[u8]>, _upper: Bound<&[u8]>, sst: Arc<SsTable>) -> bool {
-        let first_key = sst.first_key().raw_ref();
-        let last_key = sst.last_key().raw_ref();
+        let first_key = sst.first_key().key_ref();
+        let last_key = sst.last_key().key_ref();
         match (_lower, _upper) {
             (Included(lower), Included(upper)) => first_key <= upper && last_key >= lower,
             (Included(lower), Excluded(upper)) => first_key < upper && last_key >= lower,

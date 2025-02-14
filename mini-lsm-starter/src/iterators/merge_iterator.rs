@@ -92,11 +92,7 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
     }
 
     fn next(&mut self) -> Result<()> {
-        let current = self.current.as_mut();
-        if current.is_none() {
-            return Ok(());
-        }
-        let current = current.unwrap();
+        let current = self.current.as_mut().unwrap();
         while let Some(mut inner_iter) = self.iters.peek_mut() {
             if inner_iter.1.key() == current.1.key() {
                 if let e @ Err(_) = inner_iter.1.next() {

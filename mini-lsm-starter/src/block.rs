@@ -19,12 +19,10 @@ mod builder;
 mod iterator;
 
 use crate::key::KeyVec;
+use crate::table::{SIZEOF_U16, SIZEOF_U32, SIZEOF_U64};
 pub use builder::BlockBuilder;
 use bytes::{Buf, BufMut, Bytes};
 pub use iterator::BlockIterator;
-
-pub(crate) const SIZEOF_U32: usize = std::mem::size_of::<u32>();
-pub(crate) const SIZEOF_U16: usize = std::mem::size_of::<u16>();
 
 /// A block is the smallest unit of read and caching in LSM tree. It is a collection of sorted key-value pairs.
 pub struct Block {
@@ -84,8 +82,10 @@ impl Block {
         let key_end = key_begin + key_len;
 
         let key = &entry[key_begin..key_end];
+        let ts = entry[key_end..key_end + SIZEOF_U64].as_ref().get_u64();
+
         if idx == 0 {
-            return KeyVec::from_vec(key.to_vec());
+            return KeyVec::from_vec_with_ts(key.to_vec(), ts);
         }
 
         let mut key = key;
@@ -95,10 +95,10 @@ impl Block {
         let first = self.first_key().clone();
         let mut overlap: Vec<u8> = Vec::new();
 
-        overlap.put(&first.raw_ref()[..overlap_len]);
+        overlap.put(&first.key_ref()[..overlap_len]);
         overlap.put(key);
 
-        KeyVec::from_vec(overlap.to_vec())
+        KeyVec::from_vec_with_ts(overlap.to_vec(), ts)
     }
 
     pub fn first_key(&self) -> KeyVec {

@@ -16,7 +16,7 @@
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
 use super::{BlockMeta, FileObject, SsTable};
-use crate::key::KeyVec;
+use crate::key::KeyBytes;
 use crate::table::bloom::Bloom;
 use crate::{block::BlockBuilder, key::KeySlice, lsm_storage::BlockCache};
 use anyhow::Result;
@@ -31,8 +31,8 @@ pub(crate) const SIZEOF_U16: usize = std::mem::size_of::<u16>();
 /// Builds an SSTable from key-value pairs.
 pub struct SsTableBuilder {
     builder: BlockBuilder,
-    first_key: Vec<u8>,
-    last_key: Vec<u8>,
+    first_key: KeyBytes,
+    last_key: KeyBytes,
     data: Vec<u8>,
     pub(crate) meta: Vec<BlockMeta>,
     block_size: usize,
@@ -44,8 +44,8 @@ impl SsTableBuilder {
     pub fn new(block_size: usize) -> Self {
         Self {
             builder: BlockBuilder::new(block_size),
-            first_key: Vec::new(),
-            last_key: Vec::new(),
+            first_key: KeyBytes::new(),
+            last_key: KeyBytes::new(),
             data: Vec::new(),
             meta: Vec::new(),
             block_size,
@@ -59,7 +59,7 @@ impl SsTableBuilder {
     /// be helpful here)
     pub fn add(&mut self, key: KeySlice, value: &[u8]) {
         assert!(!key.is_empty(), "key must not be empty");
-        self.key_hashes.push(farmhash::fingerprint32(key.raw_ref()));
+        self.key_hashes.push(farmhash::fingerprint32(key.key_ref()));
         if self.builder.add(key, value) {
             return;
         }
@@ -108,12 +108,8 @@ impl SsTableBuilder {
         // | data | meta_size | meta | bloom_size | bloom | meta_extra_size | meta_extra |
         let file_size = data_size + meta_size + bloom_data_size + SIZEOF_U32 as u64 * 3;
 
-        let mut sst = SsTable::create_meta_only(
-            id,
-            file_size,
-            KeyVec::from_vec(sst_build.first_key).into_key_bytes(),
-            KeyVec::from_vec(sst_build.last_key).into_key_bytes(),
-        );
+        let mut sst =
+            SsTable::create_meta_only(id, file_size, sst_build.first_key, sst_build.last_key);
 
         sst.block_cache = block_cache;
 
@@ -162,10 +158,11 @@ impl SsTableBuilder {
             first_key: block.first_key().into_key_bytes(),
             last_key: block.last_key().into_key_bytes(),
         };
+        // 更新 sst 的 first key 和 last key
         if self.first_key.is_empty() {
-            self.first_key = block.first_key().into_inner();
+            self.first_key = block.first_key().into_key_bytes();
         }
-        self.last_key = block.last_key().into_inner();
+        self.last_key = block.last_key().into_key_bytes();
 
         self.meta.push(meta);
         let data = block.encode();

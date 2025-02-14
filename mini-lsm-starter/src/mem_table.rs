@@ -15,18 +15,17 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
+use anyhow::Result;
+use bytes::Bytes;
+use crossbeam_skiplist::SkipMap;
+use ouroboros::self_referencing;
 use std::ops::Bound;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use anyhow::Result;
-use bytes::Bytes;
-use crossbeam_skiplist::SkipMap;
-use ouroboros::self_referencing;
-
 use crate::iterators::StorageIterator;
-use crate::key::KeySlice;
+use crate::key::{KeySlice, TS_DEFAULT};
 use crate::table::SsTableBuilder;
 use crate::wal::Wal;
 
@@ -114,7 +113,7 @@ impl MemTable {
         self.map
             .insert(Bytes::copy_from_slice(_key), Bytes::copy_from_slice(_value));
         self.approximate_size
-            .fetch_add(_value.len() + _key.len(), Ordering::Relaxed);
+            .fetch_add(_value.len() + _key.len(), Ordering::SeqCst);
 
         if let Some(ref wal) = self.wal {
             wal.put(_key, _value)?;
@@ -126,7 +125,7 @@ impl MemTable {
     /// Implement this in week 3, day 5.
     pub fn put_batch(&self, _data: &[(KeySlice, &[u8])]) -> Result<()> {
         for (key, value) in _data {
-            self.put(key.raw_ref(), value)?;
+            self.put(key.key_ref(), value)?;
         }
         Ok(())
     }
@@ -154,7 +153,7 @@ impl MemTable {
     pub fn flush(&self, _builder: &mut SsTableBuilder) -> Result<()> {
         self.map.iter().for_each(|entry| {
             _builder.add(
-                KeySlice::from_slice(entry.key().to_vec().as_ref()),
+                KeySlice::from_slice(entry.key().to_vec().as_ref(), TS_DEFAULT),
                 entry.value(),
             );
         });
@@ -203,7 +202,7 @@ impl StorageIterator for MemTableIterator {
     }
 
     fn key(&self) -> KeySlice {
-        KeySlice::from_slice(&self.borrow_item().0[..])
+        KeySlice::from_slice(&self.borrow_item().0[..], TS_DEFAULT)
     }
 
     fn is_valid(&self) -> bool {

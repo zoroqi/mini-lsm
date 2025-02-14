@@ -20,8 +20,9 @@ use crate::key::{KeySlice, KeyVec};
 use bytes::Buf;
 use std::sync::Arc;
 
-pub(crate) const SIZEOF_U32: usize = std::mem::size_of::<u32>();
-pub(crate) const SIZEOF_U16: usize = std::mem::size_of::<u16>();
+pub(crate) const SIZEOF_U64: usize = size_of::<u64>();
+pub(crate) const SIZEOF_U32: usize = size_of::<u32>();
+pub(crate) const SIZEOF_U16: usize = size_of::<u16>();
 
 /// Iterates on a block.
 pub struct BlockIterator {
@@ -120,7 +121,6 @@ impl BlockIterator {
         let offset = self.block.offsets[idx] as usize;
         let entry = self.block.data[offset..].as_ref();
         let key = self.block.get_key(idx);
-
         // 相对偏移量
         let key_len_begin = 0;
         let key_len_end = key_len_begin + SIZEOF_U16;
@@ -129,15 +129,14 @@ impl BlockIterator {
         let key_begin = key_len_end;
         let key_end = key_begin + key_len;
 
-        // let key = entry[key_begin..key_end].as_ref();
-
-        let value_len_begin = key_end;
+        let value_len_begin = key_end + SIZEOF_U64;
         let value_len_end = value_len_begin + SIZEOF_U16;
         let value_len = entry[value_len_begin..value_len_end].as_ref().get_u16() as usize;
 
         // 转换成绝对偏移量
         let value_begin = offset + value_len_end;
         self.value_range = (value_begin, value_begin + value_len);
+
         self.key = key;
         self.idx = idx;
     }

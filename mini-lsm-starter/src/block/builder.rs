@@ -15,10 +15,10 @@
 #![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
 #![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
 
+use super::Block;
+use crate::block::iterator::{SIZEOF_U16, SIZEOF_U32, SIZEOF_U64};
 use crate::key::{KeySlice, KeyVec};
 use bytes::BufMut;
-
-use super::Block;
 
 /// Builds a block.
 pub struct BlockBuilder {
@@ -54,29 +54,31 @@ impl BlockBuilder {
         }
 
         let mut key = key;
-        let mut new_key = key.raw_ref().to_vec();
+        let mut new_key = key.key_ref().to_vec();
+        let key_ts = key.ts();
         if !is_first {
             let overlap_len = Self::compute_overlap(self.first_key.as_key_slice(), key);
-            let rest_len = key.len() - overlap_len;
-            let mut k = key.raw_ref();
+            let rest_len = key.key_len() - overlap_len;
+            let mut k = key.key_ref();
             k = &k[overlap_len..];
             new_key = (overlap_len as u16).to_be_bytes().to_vec();
             new_key.put_u16(rest_len as u16);
             new_key.put(k);
         }
 
-        key = KeySlice::from_slice(new_key.as_slice());
-        let key_len = key.len();
+        key = KeySlice::from_slice(new_key.as_slice(), key_ts);
+        let key_len = key.key_len();
         let value_len = value.len();
 
         let old_offset = self.offsets.last().unwrap();
-        let new_offset = (*old_offset as usize) + key_len + value_len + 4;
-        let total_size = new_offset + self.offsets.len() * 2;
+        let new_offset = (*old_offset as usize) + key_len + value_len + SIZEOF_U32 + SIZEOF_U64;
+        let total_size = new_offset + self.offsets.len() * SIZEOF_U16;
         if !is_first && total_size >= self.block_size {
             return false;
         }
         self.data.put_u16(key_len as u16);
-        self.data.put(key.raw_ref());
+        self.data.put(key.key_ref());
+        self.data.put_u64(key_ts);
         self.data.put_u16(value_len as u16);
         self.data.put(value);
         self.offsets.push(new_offset as u16);
@@ -89,9 +91,9 @@ impl BlockBuilder {
     }
 
     fn compute_overlap(a: KeySlice, b: KeySlice) -> usize {
-        a.raw_ref()
+        a.key_ref()
             .iter()
-            .zip(b.raw_ref())
+            .zip(b.key_ref())
             .take_while(|(a, b)| a == b)
             .count()
     }
