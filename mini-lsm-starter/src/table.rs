@@ -29,7 +29,7 @@ use bytes::{Buf, BufMut, Bytes};
 pub use iterator::SsTableIterator;
 
 use crate::block::{Block, BlockIterator};
-use crate::key::{KeyBytes, KeySlice, TS_RANGE_BEGIN};
+use crate::key::{KeyBytes, KeySlice};
 use crate::lsm_storage::BlockCache;
 
 use self::bloom::Bloom;
@@ -353,11 +353,10 @@ impl SsTable {
         self.max_ts
     }
 
-    pub fn get(&self, _key: &[u8]) -> Option<Bytes> {
-        if self.first_key().key_ref() > _key || self.last_key().key_ref() < _key {
+    pub fn get(&self, key: KeySlice) -> Option<Bytes> {
+        if self.first_key().key_ref() > key.key_ref() || self.last_key().key_ref() < key.key_ref() {
             return None;
         }
-        let key = KeySlice::from_slice(_key, 0); // TODO 处理时间
 
         if let Some(bloom) = &self.bloom {
             let hash = farmhash::fingerprint32(key.key_ref());
@@ -370,7 +369,7 @@ impl SsTable {
         let block = self.read_block_cached(idx).ok();
         if let Some(block) = block {
             let iter = BlockIterator::create_and_seek_to_key(block, key);
-            if iter.is_valid() && iter.key() == key {
+            if iter.is_valid() && iter.key().key_ref() == key.key_ref() {
                 Some(Bytes::from(iter.value().to_vec()))
             } else {
                 None

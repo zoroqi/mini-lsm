@@ -32,10 +32,10 @@ use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::iterators::StorageIterator;
-use crate::key::{KeySlice, TS_DEFAULT, TS_RANGE_BEGIN};
+use crate::key::{KeySlice, TS_DEFAULT, TS_RANGE_BEGIN, TS_RANGE_END};
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::{Manifest, ManifestRecord};
-use crate::mem_table::MemTable;
+use crate::mem_table::{vec_map_bound, MemTable};
 use crate::mvcc::LsmMvccInner;
 use crate::table::{FileObject, SsTable, SsTableBuilder, SsTableIterator};
 use anyhow::{Context, Result};
@@ -319,7 +319,7 @@ impl LsmStorageInner {
             compaction_controller,
             manifest: Some(manifest),
             options: options.into(),
-            mvcc: None,
+            mvcc: Some(LsmMvccInner::new(TS_DEFAULT)),
             compaction_filters: Arc::new(Mutex::new(Vec::new())),
         };
 
@@ -339,6 +339,12 @@ impl LsmStorageInner {
 
     /// Get a key from the storage. In day 7, this can be further optimized by using a bloom filter.
     pub fn get(&self, _key: &[u8]) -> Result<Option<Bytes>> {
+        let ts = if let Some(mvcc) = &self.mvcc {
+            mvcc.latest_commit_ts()
+        } else {
+            TS_DEFAULT
+        };
+        let _key = KeySlice::from_slice(_key, ts);
         let state = self.state.read();
         let mut value = state.memtable.get(_key);
         if value.is_none() {
@@ -386,10 +392,15 @@ impl LsmStorageInner {
 
     /// Put a key-value pair into the storage by writing into the current memtable.
     pub fn put(&self, _key: &[u8], _value: &[u8]) -> Result<()> {
+        let ts = if let Some(mvcc) = &self.mvcc {
+            mvcc.latest_commit_ts() + 1
+        } else {
+            TS_DEFAULT
+        };
         let result;
         let new_size = {
             let state = self.state.write();
-            result = state.memtable.put(_key, _value);
+            result = state.memtable.put(KeySlice::from_slice(_key, ts), _value);
             state.memtable.approximate_size()
         };
         if new_size >= self.options.target_sst_size {
@@ -398,6 +409,10 @@ impl LsmStorageInner {
             if size >= self.options.target_sst_size {
                 self.force_freeze_memtable(&lock)?;
             }
+        }
+        if let Some(mvcc) = &self.mvcc {
+            let _lock = mvcc.write_lock.lock();
+            mvcc.update_commit_ts(ts);
         }
         result
     }
@@ -455,14 +470,14 @@ impl LsmStorageInner {
     /// Force flush the earliest-created immutable memtable to disk
     pub fn force_flush_next_imm_memtable(&self) -> Result<()> {
         let _lock = self.state_lock.lock();
-        let memtable;
-        {
+        let memtable = {
             let guard = self.state.read();
-            memtable = guard
-                .imm_memtables
-                .last()
-                .expect("imm memtable is empty")
-                .clone();
+            let memtable = guard.imm_memtables.last();
+            if memtable.is_none() {
+                return Ok(());
+            }
+
+            memtable.unwrap().clone()
         };
         let mut builder = SsTableBuilder::new(self.options.block_size);
         memtable.flush(&mut builder)?;
@@ -511,17 +526,30 @@ impl LsmStorageInner {
             let guard = self.state.read();
             Arc::clone(&guard)
         };
-        let iter = snapshot.memtable.scan(_lower, _upper);
+        let lower = vec_map_bound(_lower, TS_RANGE_BEGIN);
+        let upper = vec_map_bound(_upper, TS_RANGE_END);
 
-        let mut mem = vec![iter];
+        let mut mem_iters = Vec::with_capacity(snapshot.imm_memtables.len() + 1);
+
+        let lower = match lower {
+            Excluded(key) => Excluded(KeySlice::from_slice(key.key_ref(), TS_RANGE_END)),
+            _ => lower,
+        };
+
+        let upper = match upper {
+            Excluded(key) => Excluded(KeySlice::from_slice(key.key_ref(), TS_RANGE_BEGIN)),
+            _ => upper,
+        };
+        let iter = snapshot.memtable.scan(lower, upper);
+        mem_iters.push(iter);
 
         snapshot
             .imm_memtables
             .iter()
-            .map(|m| m.scan(_lower, _upper))
-            .for_each(|i| mem.push(i));
+            .map(|m| m.scan(lower, upper))
+            .for_each(|i| mem_iters.push(i));
 
-        let mem_iter = MergeIterator::create(mem.into_iter().map(Box::new).collect());
+        let mem_iter = MergeIterator::create(mem_iters.into_iter().map(Box::new).collect());
 
         let level0_sst = snapshot
             .l0_sstables
@@ -531,12 +559,12 @@ impl LsmStorageInner {
             .map(|sst| match _lower {
                 Included(key) => SsTableIterator::create_and_seek_to_key(
                     sst,
-                    KeySlice::from_slice(key, TS_DEFAULT),
+                    KeySlice::from_slice(key, TS_RANGE_BEGIN),
                 ),
                 Excluded(key) => {
                     let mut iter = SsTableIterator::create_and_seek_to_key(
                         sst,
-                        KeySlice::from_slice(key, TS_DEFAULT),
+                        KeySlice::from_slice(key, TS_RANGE_END),
                     );
                     if iter.is_ok() {
                         let i = iter.as_mut().unwrap();
@@ -561,7 +589,6 @@ impl LsmStorageInner {
                 .map(|id| snapshot.sstables[id].clone())
                 .filter(|sst| Self::range_overlap(_lower, _upper, sst.clone()))
                 .collect::<Vec<Arc<SsTable>>>();
-
             let iter = SstConcatIterator::create_and_seek_to_first(sst)?;
             level_iters.push(Box::new(iter));
         }
@@ -571,7 +598,8 @@ impl LsmStorageInner {
 
         let level_concat_iter = MergeIterator::create(level_iters);
         let inner = TwoMergeIterator::create(mem_level0, level_concat_iter)?;
-        LsmIterator::new(inner, _lower, _upper).map(FusedIterator::new)
+
+        LsmIterator::new(inner, _upper).map(FusedIterator::new)
     }
 
     fn range_overlap(_lower: Bound<&[u8]>, _upper: Bound<&[u8]>, sst: Arc<SsTable>) -> bool {

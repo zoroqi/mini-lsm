@@ -53,21 +53,60 @@ impl BlockBuilder {
             self.offsets.push(0);
         }
 
-        let mut key = key;
-        let mut new_key = key.key_ref().to_vec();
-        let key_ts = key.ts();
-        if !is_first {
-            let overlap_len = Self::compute_overlap(self.first_key.as_key_slice(), key);
-            let rest_len = key.key_len() - overlap_len;
-            let mut k = key.key_ref();
-            k = &k[overlap_len..];
-            new_key = (overlap_len as u16).to_be_bytes().to_vec();
-            new_key.put_u16(rest_len as u16);
-            new_key.put(k);
-        }
+        let nk = if !is_first {
+            // 这里遇到一个问题, 在使用 Bytes::from_static(unsafe { std::mem::transmute(key.key_ref()) }) 时, 会出现错误.
+            // 错误是 key.key_ref() 返回的地址和 Vec::with_capacity 创建的 new_key 地址会有不一致的情况,
+            // 导致 `unsafe precondition(s) violated: ptr::copy_nonoverlapping requires that both pointer arguments are aligned and non-null and the specified memory ranges do not overlap` 错误.
+            // 不知道为什么, 不再使用 unsafe 就好了. 仅仅用一个下午学的 rust, 还不足以理解这个问题.
 
-        key = KeySlice::from_slice(new_key.as_slice(), key_ts);
-        let key_len = key.key_len();
+            // println!("1f: {:?}, k: {:?}", self.first_key.key_ref(), key.key_ref());
+            let overlap_len = Self::compute_overlap(self.first_key.key_ref(), key.key_ref());
+            let rest_len = key.key_len() - overlap_len;
+            // let mut k = Vec::with_capacity(key.key_len());
+            // for i in key.key_ref() {
+            //     k.push(*i);
+            // }
+            let k = key.key_ref();
+            // println!("1.1key_ref ptr: {:p}", k.as_ptr());
+            // println!("2o: {}, r: {}", overlap_len, rest_len);
+            // println!("3f: {:?}, k: {:?}", self.first_key.key_ref(), k);
+
+            let mut new_key = Vec::with_capacity(4 + rest_len); // 预分配容量
+                                                                // println!("3.1nk_ref ptr: {:p}", new_key.as_ptr());
+
+            // println!(
+            //     "4f: {:?}, k: {:?}, n:{:?}",
+            //     self.first_key.key_ref(),
+            //     k,
+            //     new_key
+            // );
+            new_key.put_u16(overlap_len as u16);
+            // println!("4.1nk_ref ptr: {:p}", new_key.as_ptr());
+            new_key.put_u16(rest_len as u16);
+            // println!("4.2nk_ref ptr: {:p}", new_key.as_ptr());
+            // println!(
+            //     "5f: {:?}, k: {:?}, n:{:?}",
+            //     self.first_key.key_ref(),
+            //     k,
+            //     new_key
+            // );
+            new_key.put(&k[overlap_len..]);
+            // println!(
+            //     "6f: {:?}, k: {:?}, n:{:?}",
+            //     self.first_key.key_ref(),
+            //     k,
+            //     new_key
+            // );
+            new_key
+        } else {
+            key.key_ref().to_vec()
+        };
+
+        let key_ts = key.ts();
+        // println!("build: {:?}, key:{:?}, {}", nk, key.key_ref(),key_ts);
+        // let key = KeySlice::from_slice(new_key.as_slice(), key_ts);
+
+        let key_len = nk.len();
         let value_len = value.len();
 
         let old_offset = self.offsets.last().unwrap();
@@ -77,7 +116,7 @@ impl BlockBuilder {
             return false;
         }
         self.data.put_u16(key_len as u16);
-        self.data.put(key.key_ref());
+        self.data.put(nk.as_slice());
         self.data.put_u64(key_ts);
         self.data.put_u16(value_len as u16);
         self.data.put(value);
@@ -90,12 +129,8 @@ impl BlockBuilder {
         self.first_key.is_empty()
     }
 
-    fn compute_overlap(a: KeySlice, b: KeySlice) -> usize {
-        a.key_ref()
-            .iter()
-            .zip(b.key_ref())
-            .take_while(|(a, b)| a == b)
-            .count()
+    fn compute_overlap(a: &[u8], b: &[u8]) -> usize {
+        a.iter().zip(b).take_while(|(a, b)| a == b).count()
     }
 
     /// Finalize the block.

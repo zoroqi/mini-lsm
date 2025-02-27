@@ -38,27 +38,28 @@ type LsmIteratorInner = TwoMergeIterator<
 
 pub struct LsmIterator {
     inner: LsmIteratorInner,
-    _lower: Bound<Bytes>,
+    // _lower: Bound<Bytes>,
     _upper: Bound<Bytes>,
     end: bool,
+    prev_key: Vec<u8>,
 }
 
 impl LsmIterator {
-    pub(crate) fn new(iter: LsmIteratorInner, low: Bound<&[u8]>, up: Bound<&[u8]>) -> Result<Self> {
+    pub(crate) fn new(iter: LsmIteratorInner, up: Bound<&[u8]>) -> Result<Self> {
         let mut n = Self {
             inner: iter,
-            _lower: map_bound(low),
             _upper: map_bound(up),
             end: false,
+            prev_key: Vec::new(),
         };
         n.move_del_key()?;
-        // n.skip_low().unwrap();
         n.check_end();
         Ok(n)
     }
 
     fn move_del_key(&mut self) -> Result<()> {
-        while self.is_valid() && self.value().is_empty() {
+        while self.is_valid() && (self.value().is_empty() || self.key() == self.prev_key) {
+            self.prev_key = self.key().to_vec();
             self.inner.next()?;
         }
         Ok(())
@@ -69,29 +70,14 @@ impl LsmIterator {
             self.end = true;
             return;
         }
-        let key = self.key();
+        let key = self.inner.key().key_ref();
+
         let end = match &self._upper {
             Bound::Included(h) => key > h,
             Bound::Excluded(h) => key >= h,
             Bound::Unbounded => false,
         };
         self.end = end;
-    }
-    fn skip_low(&mut self) -> Result<()> {
-        if !self.is_valid() {
-            return Ok(());
-        }
-        let key = self.key();
-        let remove = match &self._lower {
-            Bound::Included(l) => key < l,
-            Bound::Excluded(l) => key <= l,
-            Bound::Unbounded => false,
-        };
-        if remove {
-            self.inner.next()?;
-            return self.skip_low();
-        }
-        Ok(())
     }
 }
 
@@ -115,6 +101,7 @@ impl StorageIterator for LsmIterator {
     }
 
     fn next(&mut self) -> Result<()> {
+        self.prev_key = self.key().to_vec();
         self.inner.next()?;
         self.move_del_key()?;
         self.check_end();

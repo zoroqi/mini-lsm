@@ -320,22 +320,23 @@ impl LsmStorageInner {
     ) -> Result<Vec<Arc<SsTable>>> {
         let mut result: Vec<Arc<SsTable>> = Vec::new();
         let mut new_sst = SsTableBuilder::new(self.options.block_size);
+        let mut prev_key = Vec::new();
         while iter.is_valid() {
             let key = iter.key();
             let value = iter.value();
-            if !value.is_empty() {
-                new_sst.add(key, value);
-                if new_sst.estimated_size() >= self.options.target_sst_size {
-                    let sst_id = self.next_sst_id();
-                    let sst = new_sst.build(
-                        sst_id,
-                        Some(self.block_cache.clone()),
-                        self.path_of_sst(sst_id),
-                    )?;
-                    result.push(Arc::new(sst));
-                    new_sst = SsTableBuilder::new(self.options.block_size);
-                }
+            let cur_key = key.key_ref().to_vec();
+            if prev_key != cur_key && new_sst.estimated_size() >= self.options.target_sst_size {
+                let sst_id = self.next_sst_id();
+                let sst = new_sst.build(
+                    sst_id,
+                    Some(self.block_cache.clone()),
+                    self.path_of_sst(sst_id),
+                )?;
+                result.push(Arc::new(sst));
+                new_sst = SsTableBuilder::new(self.options.block_size);
             }
+            new_sst.add(key, value);
+            prev_key = cur_key;
             let _ = iter.next();
         }
         if new_sst.estimated_size() > 0 {
