@@ -41,25 +41,34 @@ pub struct LsmIterator {
     // _lower: Bound<Bytes>,
     _upper: Bound<Bytes>,
     end: bool,
-    prev_key: Vec<u8>,
+    read_ts: u64,
 }
 
 impl LsmIterator {
-    pub(crate) fn new(iter: LsmIteratorInner, up: Bound<&[u8]>) -> Result<Self> {
+    pub(crate) fn new(iter: LsmIteratorInner, up: Bound<&[u8]>, read_ts: u64) -> Result<Self> {
         let mut n = Self {
             inner: iter,
             _upper: map_bound(up),
             end: false,
-            prev_key: Vec::new(),
+            read_ts,
         };
-        n.move_del_key()?;
+        n.move_del_key(Vec::new())?;
         n.check_end();
         Ok(n)
     }
 
-    fn move_del_key(&mut self) -> Result<()> {
-        while self.is_valid() && (self.value().is_empty() || self.key() == self.prev_key) {
-            self.prev_key = self.key().to_vec();
+    fn move_del_key(&mut self, prev_key: Vec<u8>) -> Result<()> {
+        let mut prev_key = prev_key;
+        while self.is_valid()
+            && (self.value().is_empty()
+                || self.inner.key().ts() > self.read_ts
+                || (self.inner.key().key_ref() == prev_key))
+        {
+            // 当 value 为空时, 并且 key 的时间戳小于等于 read_ts 时, 需要调整 prev_key.
+            // 表示这个 key 已经被删除, 之后再出现相同的 key 直接跳过就可以了.
+            if self.inner.value().is_empty() && self.inner.key().ts() <= self.read_ts {
+                prev_key = self.inner.key().key_ref().to_vec();
+            }
             self.inner.next()?;
         }
         Ok(())
@@ -101,9 +110,9 @@ impl StorageIterator for LsmIterator {
     }
 
     fn next(&mut self) -> Result<()> {
-        self.prev_key = self.key().to_vec();
+        let prev_key = self.key().to_vec();
         self.inner.next()?;
-        self.move_del_key()?;
+        self.move_del_key(prev_key)?;
         self.check_end();
         Ok(())
     }

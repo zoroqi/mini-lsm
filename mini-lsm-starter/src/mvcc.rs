@@ -69,6 +69,6 @@ impl LsmMvccInner {
     }
 
     pub fn new_txn(&self, inner: Arc<LsmStorageInner>, serializable: bool) -> Arc<Transaction> {
-        unimplemented!()
+        Arc::new(Transaction::new(self.latest_commit_ts(), inner))
     }
 }

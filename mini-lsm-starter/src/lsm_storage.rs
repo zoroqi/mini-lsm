@@ -36,6 +36,7 @@ use crate::key::{KeySlice, TS_DEFAULT, TS_RANGE_BEGIN, TS_RANGE_END};
 use crate::lsm_iterator::{FusedIterator, LsmIterator};
 use crate::manifest::{Manifest, ManifestRecord};
 use crate::mem_table::{vec_map_bound, MemTable};
+use crate::mvcc::txn::{Transaction, TxnIterator};
 use crate::mvcc::LsmMvccInner;
 use crate::table::{FileObject, SsTable, SsTableBuilder, SsTableIterator};
 use anyhow::{Context, Result};
@@ -222,7 +223,7 @@ impl MiniLsm {
         }))
     }
 
-    pub fn new_txn(&self) -> Result<()> {
+    pub fn new_txn(&self) -> Result<Arc<Transaction>> {
         self.inner.new_txn()
     }
 
@@ -250,11 +251,7 @@ impl MiniLsm {
         self.inner.sync()
     }
 
-    pub fn scan(
-        &self,
-        lower: Bound<&[u8]>,
-        upper: Bound<&[u8]>,
-    ) -> Result<FusedIterator<LsmIterator>> {
+    pub fn scan(&self, lower: Bound<&[u8]>, upper: Bound<&[u8]>) -> Result<TxnIterator> {
         self.inner.scan(lower, upper)
     }
 
@@ -279,6 +276,9 @@ impl LsmStorageInner {
     pub(crate) fn next_sst_id(&self) -> usize {
         self.next_sst_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    }
+    pub(crate) fn mvcc(&self) -> &LsmMvccInner {
+        self.mvcc.as_ref().unwrap()
     }
 
     /// Start the storage engine by either loading an existing directory or creating a new one if the directory does
@@ -338,13 +338,12 @@ impl LsmStorageInner {
     }
 
     /// Get a key from the storage. In day 7, this can be further optimized by using a bloom filter.
-    pub fn get(&self, _key: &[u8]) -> Result<Option<Bytes>> {
-        let ts = if let Some(mvcc) = &self.mvcc {
-            mvcc.latest_commit_ts()
-        } else {
-            TS_DEFAULT
-        };
-        let _key = KeySlice::from_slice(_key, ts);
+    pub fn get(self: &Arc<LsmStorageInner>, _key: &[u8]) -> Result<Option<Bytes>> {
+        let txn = self.new_txn()?;
+        txn.get(_key)
+    }
+    pub fn get_with_ts(&self, _key: &[u8], read_ts: u64) -> Result<Option<Bytes>> {
+        let _key = KeySlice::from_slice(_key, read_ts);
         let state = self.state.read();
         let mut value = state.memtable.get(_key);
         if value.is_none() {
@@ -511,16 +510,25 @@ impl LsmStorageInner {
         Ok(())
     }
 
-    pub fn new_txn(&self) -> Result<()> {
-        // no-op
-        Ok(())
+    pub fn new_txn(self: &Arc<Self>) -> Result<Arc<Transaction>> {
+        Ok(self.mvcc().new_txn(self.clone(), true))
     }
 
     /// Create an iterator over a range of keys.
     pub fn scan(
+        self: &Arc<LsmStorageInner>,
+        _lower: Bound<&[u8]>,
+        _upper: Bound<&[u8]>,
+    ) -> Result<TxnIterator> {
+        let txn = self.new_txn()?;
+        txn.scan(_lower, _upper)
+    }
+
+    pub fn scan_with_ts(
         &self,
         _lower: Bound<&[u8]>,
         _upper: Bound<&[u8]>,
+        read_ts: u64,
     ) -> Result<FusedIterator<LsmIterator>> {
         let snapshot = {
             let guard = self.state.read();
@@ -599,7 +607,7 @@ impl LsmStorageInner {
         let level_concat_iter = MergeIterator::create(level_iters);
         let inner = TwoMergeIterator::create(mem_level0, level_concat_iter)?;
 
-        LsmIterator::new(inner, _upper).map(FusedIterator::new)
+        LsmIterator::new(inner, _upper, read_ts).map(FusedIterator::new)
     }
 
     fn range_overlap(_lower: Bound<&[u8]>, _upper: Bound<&[u8]>, sst: Arc<SsTable>) -> bool {
