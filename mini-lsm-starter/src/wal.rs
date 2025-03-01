@@ -51,7 +51,6 @@ impl Wal {
             .create(true)
             .open(_path)
             .context("Failed to create wal file")?;
-
         let mut contents = Vec::new();
         file.read_to_end(&mut contents)?;
         let mut read = &*contents;

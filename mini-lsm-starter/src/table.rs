@@ -190,8 +190,13 @@ impl SsTable {
         let file_size = file.size();
         let u32_sizeof = SIZEOF_U32 as u64;
 
-        let meta_data_offset = file.read(file_size - u32_sizeof, u32_sizeof)?;
+        let max_ts = file.read(file_size - (SIZEOF_U64 as u64), SIZEOF_U64 as u64)?;
+        let max_ts = max_ts.as_slice().get_u64();
+
+        let meta_data_offset =
+            file.read(file_size - u32_sizeof - (SIZEOF_U64 as u64), u32_sizeof)?;
         let meta_data_offset = meta_data_offset.as_slice().get_u32() as u64;
+
         let offset = meta_data_offset;
         let _id = file.read(offset, u32_sizeof)?;
         let _id = _id.as_slice().get_u32() as usize;
@@ -228,6 +233,7 @@ impl SsTable {
             .first()
             .map(|x| x.first_key.clone())
             .unwrap_or_default();
+
         let last_key = block_meta
             .last()
             .map(|x| x.last_key.clone())
@@ -242,7 +248,7 @@ impl SsTable {
             first_key,
             last_key,
             bloom: Some(bloom),
-            max_ts: 0,
+            max_ts,
         })
     }
 

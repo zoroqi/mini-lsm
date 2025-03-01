@@ -657,12 +657,14 @@ impl LsmStorageInner {
             }
         }
         let mut max_id = 0;
+        let mut max_ts = TS_DEFAULT;
         // load sst
         let mut load = |id: usize| -> Result<()> {
             let path = self.path_of_sst(id);
             let file =
                 FileObject::open(&path).with_context(|| format!("Failed to open sst: {:?}", id))?;
             let sst = SsTable::open(id, Some(self.block_cache.clone()), file)?;
+            max_ts = max_ts.max(sst.max_ts());
             state.sstables.insert(id, Arc::new(sst));
             max_id = max_id.max(id);
             Ok(())
@@ -691,6 +693,7 @@ impl LsmStorageInner {
                 let mut imm_memtable = Vec::with_capacity(all_memtable_id.len());
                 for id in all_memtable_id {
                     let mem = MemTable::recover_from_wal(id, self.path_of_wal(id))?;
+                    max_ts = max_ts.max(mem.max_ts());
                     imm_memtable.push(Arc::new(mem));
                 }
                 let (m, imm) = imm_memtable.split_at(1);
@@ -713,6 +716,9 @@ impl LsmStorageInner {
         }
 
         *self.state.write() = Arc::new(state);
+        if let Some(mvcc) = &self.mvcc {
+            mvcc.update_commit_ts(max_ts);
+        }
         Ok(())
     }
 }
