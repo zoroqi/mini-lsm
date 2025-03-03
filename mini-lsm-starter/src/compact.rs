@@ -321,9 +321,13 @@ impl LsmStorageInner {
         let mut result: Vec<Arc<SsTable>> = Vec::new();
         let mut new_sst = SsTableBuilder::new(self.options.block_size);
         let mut prev_key = Vec::new();
+        let mut latest_key = Vec::new();
+
+        let latest_commit_id = self.mvcc().watermark();
         while iter.is_valid() {
             let key = iter.key();
             let value = iter.value();
+            let key_ts = key.ts();
             let cur_key = key.key_ref().to_vec();
             if prev_key != cur_key && new_sst.estimated_size() >= self.options.target_sst_size {
                 let sst_id = self.next_sst_id();
@@ -335,10 +339,26 @@ impl LsmStorageInner {
                 result.push(Arc::new(sst));
                 new_sst = SsTableBuilder::new(self.options.block_size);
             }
-            new_sst.add(key, value);
+            // 三个触发条件
+            // 1. 大于 latest_commit_id
+            // 对于低于或等于浮水印的金钥的所有版本，保留最新版本:
+            // 1. 和前一个 key 不同, 表示当前 key 第一次出现, 也就是最新的版本
+            // 2. 和前一个因为 > latest_commit_id 写入的 key 相同, 表示当前 key 是 < latest_commit_id 后第一次出现, 也就是最新的版本.
+            if key_ts > latest_commit_id || prev_key != cur_key || latest_key == cur_key {
+                latest_key = Vec::new();
+
+                // 需要过滤 < latest_commit_id 条件下已经删除的 key
+                if key_ts > latest_commit_id || !value.is_empty() {
+                    new_sst.add(key, value);
+                }
+            }
+            if key_ts > latest_commit_id {
+                latest_key = cur_key.clone();
+            }
             prev_key = cur_key;
             let _ = iter.next();
         }
+
         if new_sst.estimated_size() > 0 {
             let sst_id = self.next_sst_id();
             let sst_path = self.path_of_sst(sst_id);
