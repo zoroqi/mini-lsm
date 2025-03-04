@@ -380,45 +380,52 @@ impl LsmStorageInner {
 
     /// Write a batch of data into the storage. Implement in week 2 day 7.
     pub fn write_batch<T: AsRef<[u8]>>(&self, batch: &[WriteBatchRecord<T>]) -> Result<()> {
-        for record in batch {
-            match record {
-                WriteBatchRecord::Put(key, value) => self.put(key.as_ref(), value.as_ref())?,
-                WriteBatchRecord::Del(key) => self.delete(key.as_ref())?,
-            }
+        self.write_batch_inner(batch)
+    }
+
+    pub fn write_batch_inner<T: AsRef<[u8]>>(&self, batch: &[WriteBatchRecord<T>]) -> Result<()> {
+        let _lck = self.mvcc().write_lock.lock();
+        let ts = self.mvcc().latest_commit_ts() + 1;
+        let empty = Bytes::new();
+        let batch = batch
+            .iter()
+            .map(|record| match record {
+                WriteBatchRecord::Put(key, value) => {
+                    (KeySlice::from_slice(key.as_ref(), ts), value.as_ref())
+                }
+                WriteBatchRecord::Del(key) => {
+                    (KeySlice::from_slice(key.as_ref(), ts), empty.as_ref())
+                }
+            })
+            .collect::<Vec<(KeySlice, &[u8])>>();
+
+        for b in batch.clone() {
+            println!("{:?}", b);
         }
-        Ok(())
+
+        let result;
+        let new_size = {
+            let state = self.state.write();
+            result = state.memtable.put_batch(batch.as_ref());
+            state.memtable.approximate_size()
+        };
+
+        if new_size >= self.options.target_sst_size {
+            let lock = self.state_lock.lock();
+            self.force_freeze_memtable(&lock)?;
+        }
+        self.mvcc().update_commit_ts(ts);
+        result
     }
 
     /// Put a key-value pair into the storage by writing into the current memtable.
     pub fn put(&self, _key: &[u8], _value: &[u8]) -> Result<()> {
-        let ts = if let Some(mvcc) = &self.mvcc {
-            mvcc.latest_commit_ts() + 1
-        } else {
-            TS_DEFAULT
-        };
-        let result;
-        let new_size = {
-            let state = self.state.write();
-            result = state.memtable.put(KeySlice::from_slice(_key, ts), _value);
-            state.memtable.approximate_size()
-        };
-        if new_size >= self.options.target_sst_size {
-            let lock = self.state_lock.lock();
-            let size = self.state.read().memtable.approximate_size();
-            if size >= self.options.target_sst_size {
-                self.force_freeze_memtable(&lock)?;
-            }
-        }
-        if let Some(mvcc) = &self.mvcc {
-            let _lock = mvcc.write_lock.lock();
-            mvcc.update_commit_ts(ts);
-        }
-        result
+        self.write_batch_inner(&[WriteBatchRecord::Put(_key, _value)])
     }
 
     /// Remove a key from the storage by writing an empty value.
     pub fn delete(&self, _key: &[u8]) -> Result<()> {
-        self.put(_key, &[])
+        self.write_batch_inner(&[WriteBatchRecord::Del(_key)])
     }
 
     pub(crate) fn path_of_sst_static(path: impl AsRef<Path>, id: usize) -> PathBuf {

@@ -55,8 +55,10 @@ impl Wal {
         file.read_to_end(&mut contents)?;
         let mut read = &*contents;
         while read.has_remaining() {
-            let (key, value) = Self::decode(&mut read)?;
-            _skiplist.insert(key, value);
+            let one_batch = Self::decode_batch(&mut read)?;
+            for (key, value) in one_batch {
+                _skiplist.insert(key, value);
+            }
         }
 
         let file = BufWriter::new(file);
@@ -65,55 +67,64 @@ impl Wal {
         })
     }
 
-    pub fn put(&self, key: KeySlice, _value: &[u8]) -> Result<()> {
-        let ts = key.ts();
-        let _key = key.key_ref();
-        let key_len = _key.len() as u16;
-        let value_len = _value.len() as u16;
+    pub fn put(&self, key: KeySlice, value: &[u8]) -> Result<()> {
+        self.put_batch(&[(key, value)])
+    }
+
+    /// Implement this in week 3, day 5.
+    pub fn put_batch(&self, data: &[(KeySlice, &[u8])]) -> Result<()> {
+        let size = data.len();
+        if size == 0 {
+            return Ok(());
+        }
+
+        let mut record = Vec::new();
+        record.put_u32(size as u32);
+
         let mut hasher = crc32fast::Hasher::new();
-        hasher.update(_key);
-        hasher.update(_value);
-        hasher.update(&ts.to_be_bytes());
+        for (k, v) in data.iter().copied() {
+            let key = k.key_ref();
+            let ts = k.ts();
+
+            hasher.update(key);
+            hasher.update(v);
+            hasher.update(&ts.to_be_bytes());
+
+            record.put_u16(key.len() as u16);
+            record.put(key);
+            record.put_u64(ts);
+            record.put_u16(v.len() as u16);
+            record.put(v);
+        }
         let checksum = hasher.finalize();
-        let mut record: Vec<u8> =
-            Vec::with_capacity(4 + 4 + 8 + key_len as usize + value_len as usize);
-        record.put_u16(key_len);
-        record.put(_key);
-        record.put_u64(ts);
-        record.put_u16(value_len);
-        record.put(_value);
         record.put_u32(checksum);
         let mut file = self.file.lock();
         file.write_all(&record)?;
         Ok(())
     }
 
-    fn decode(mut record: impl Buf) -> Result<(KeyBytes, Bytes)> {
-        let key_len = record.get_u16() as usize;
-        let key = record.copy_to_bytes(key_len);
-        let ts = record.get_u64();
-        let value_len = record.get_u16() as usize;
-        let value = record.copy_to_bytes(value_len);
-        let checksum = record.get_u32();
-
+    fn decode_batch(mut record: impl Buf) -> Result<Vec<(KeyBytes, Bytes)>> {
+        let size = record.get_u32();
+        let mut result: Vec<(KeyBytes, Bytes)> = Vec::with_capacity(size as usize);
         let mut hasher = crc32fast::Hasher::new();
-        hasher.update(key.as_bytes());
-        hasher.update(value.as_bytes());
-        hasher.update(&ts.to_be_bytes());
-        let crc32 = hasher.finalize();
+        for _ in 0..size {
+            let key_len = record.get_u16() as usize;
+            let key = record.copy_to_bytes(key_len);
+            let ts = record.get_u64();
+            let value_len = record.get_u16() as usize;
+            let value = record.copy_to_bytes(value_len);
 
-        if crc32 != checksum {
+            hasher.update(key.as_bytes());
+            hasher.update(value.as_bytes());
+            hasher.update(&ts.to_be_bytes());
+
+            result.push((KeyBytes::from_bytes_with_ts(key, ts), value));
+        }
+        let crc32 = record.get_u32();
+        if hasher.finalize() != crc32 {
             bail!("checksum mismatch");
         }
-        Ok((KeyBytes::from_bytes_with_ts(key, ts), value))
-    }
-
-    /// Implement this in week 3, day 5.
-    pub fn put_batch(&self, _data: &[(KeySlice, &[u8])]) -> Result<()> {
-        for (key, value) in _data {
-            self.put(*key, value)?;
-        }
-        Ok(())
+        Ok(result)
     }
 
     pub fn sync(&self) -> Result<()> {
