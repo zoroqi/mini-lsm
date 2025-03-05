@@ -72,6 +72,6 @@ impl LsmMvccInner {
         let mut lock = self.ts.lock();
         let ts = lock.0;
         lock.1.add_reader(ts);
-        Arc::new(Transaction::new(ts, inner))
+        Arc::new(Transaction::new(ts, inner, serializable))
     }
 }

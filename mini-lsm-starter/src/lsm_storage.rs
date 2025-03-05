@@ -380,10 +380,10 @@ impl LsmStorageInner {
 
     /// Write a batch of data into the storage. Implement in week 2 day 7.
     pub fn write_batch<T: AsRef<[u8]>>(&self, batch: &[WriteBatchRecord<T>]) -> Result<()> {
-        self.write_batch_inner(batch)
+        self.write_batch_inner(batch).map(|_| ())
     }
 
-    pub fn write_batch_inner<T: AsRef<[u8]>>(&self, batch: &[WriteBatchRecord<T>]) -> Result<()> {
+    pub fn write_batch_inner<T: AsRef<[u8]>>(&self, batch: &[WriteBatchRecord<T>]) -> Result<u64> {
         let _lck = self.mvcc().write_lock.lock();
         let ts = self.mvcc().latest_commit_ts() + 1;
         let empty = Bytes::new();
@@ -399,14 +399,9 @@ impl LsmStorageInner {
             })
             .collect::<Vec<(KeySlice, &[u8])>>();
 
-        for b in batch.clone() {
-            println!("{:?}", b);
-        }
-
-        let result;
         let new_size = {
             let state = self.state.write();
-            result = state.memtable.put_batch(batch.as_ref());
+            state.memtable.put_batch(batch.as_ref())?;
             state.memtable.approximate_size()
         };
 
@@ -415,17 +410,19 @@ impl LsmStorageInner {
             self.force_freeze_memtable(&lock)?;
         }
         self.mvcc().update_commit_ts(ts);
-        result
+        Ok(ts)
     }
 
     /// Put a key-value pair into the storage by writing into the current memtable.
     pub fn put(&self, _key: &[u8], _value: &[u8]) -> Result<()> {
         self.write_batch_inner(&[WriteBatchRecord::Put(_key, _value)])
+            .map(|_| ())
     }
 
     /// Remove a key from the storage by writing an empty value.
     pub fn delete(&self, _key: &[u8]) -> Result<()> {
         self.write_batch_inner(&[WriteBatchRecord::Del(_key)])
+            .map(|_| ())
     }
 
     pub(crate) fn path_of_sst_static(path: impl AsRef<Path>, id: usize) -> PathBuf {
@@ -518,7 +515,7 @@ impl LsmStorageInner {
     }
 
     pub fn new_txn(self: &Arc<Self>) -> Result<Arc<Transaction>> {
-        Ok(self.mvcc().new_txn(self.clone(), true))
+        Ok(self.mvcc().new_txn(self.clone(), self.options.serializable))
     }
 
     /// Create an iterator over a range of keys.
