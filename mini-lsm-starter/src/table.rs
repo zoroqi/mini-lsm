@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
 pub(crate) mod bloom;
 mod builder;
 mod iterator;
@@ -284,7 +281,6 @@ impl SsTable {
             self.block_meta_offset
         } - SIZEOF_U32;
 
-        let meta = &self.block_meta[block_idx];
         let data = self.file.read(begin as u64, (end - begin) as u64)?;
         let checksum = self.file.read(end as u64, SIZEOF_U32 as u64)?;
         let checksum = checksum.as_slice().get_u32();

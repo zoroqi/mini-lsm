@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
 use super::Block;
 use crate::block::iterator::{SIZEOF_U16, SIZEOF_U32, SIZEOF_U64};
 use crate::key::{KeySlice, KeyVec};

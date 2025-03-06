@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unused_variables)] // TODO(you): remove this lint after implementing this mod
-#![allow(dead_code)] // TODO(you): remove this lint after implementing this mod
-
 use super::{BlockMeta, FileObject, SsTable};
 use crate::key::KeyBytes;
 use crate::table::bloom::Bloom;
@@ -24,9 +21,7 @@ use bytes::BufMut;
 use std::path::Path;
 use std::sync::Arc;
 
-pub(crate) const SIZEOF_U64: usize = std::mem::size_of::<u64>();
-pub(crate) const SIZEOF_U32: usize = std::mem::size_of::<u32>();
-pub(crate) const SIZEOF_U16: usize = std::mem::size_of::<u16>();
+pub(crate) const SIZEOF_U32: usize = size_of::<u32>();
 
 /// Builds an SSTable from key-value pairs.
 pub struct SsTableBuilder {
