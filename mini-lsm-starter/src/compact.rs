@@ -28,7 +28,7 @@ use crate::iterators::merge_iterator::MergeIterator;
 use crate::iterators::two_merge_iterator::TwoMergeIterator;
 use crate::iterators::StorageIterator;
 use crate::key::KeySlice;
-use crate::lsm_storage::{LsmStorageInner, LsmStorageState};
+use crate::lsm_storage::{CompactionFilter, LsmStorageInner, LsmStorageState};
 use crate::manifest::ManifestRecord;
 use crate::table::{SsTable, SsTableBuilder, SsTableIterator};
 use anyhow::Result;
@@ -318,12 +318,26 @@ impl LsmStorageInner {
         &self,
         mut iter: impl for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>,
     ) -> Result<Vec<Arc<SsTable>>> {
+        // 无法理解为什么会有 `if` and `else` have incompatible types 错误, 类型应该是一样的啊?
+        // let filter = self.compaction_filters.lock();
+        // let compaction_filter = if filter.is_empty() {
+        //     |_: Vec<u8>| -> bool { false }
+        // } else {
+        //     |key: Vec<u8>| -> bool {
+        //         filter.iter().any(|f| match f {
+        //             CompactionFilter::Prefix(prefix) => key.starts_with(prefix),
+        //             _ => false,
+        //         })
+        //     }
+        // };
+
         let mut result: Vec<Arc<SsTable>> = Vec::new();
         let mut new_sst = SsTableBuilder::new(self.options.block_size);
         let mut prev_key = Vec::new();
         let mut latest_key = Vec::new();
 
         let latest_commit_id = self.mvcc().watermark();
+        let compaction_filters = self.compaction_filters.lock().clone();
         while iter.is_valid() {
             let key = iter.key();
             let value = iter.value();
@@ -345,10 +359,34 @@ impl LsmStorageInner {
             // 1. 和前一个 key 不同, 表示当前 key 第一次出现, 也就是最新的版本
             // 2. 和前一个因为 > latest_commit_id 写入的 key 相同, 表示当前 key 是 < latest_commit_id 后第一次出现, 也就是最新的版本.
             if key_ts > latest_commit_id || prev_key != cur_key || latest_key == cur_key {
+                // <= latest_commit_id 的最新 key
+                let delete = if key_ts <= latest_commit_id
+                    && (prev_key != cur_key || latest_key == cur_key)
+                {
+                    if compaction_filters.is_empty() {
+                        false
+                    } else {
+                        let mut flag = false;
+                        for filter in &compaction_filters {
+                            match filter {
+                                CompactionFilter::Prefix(x) => {
+                                    if cur_key.starts_with(x) {
+                                        flag = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        flag
+                    }
+                } else {
+                    false
+                };
+
                 latest_key = Vec::new();
 
                 // 需要过滤 < latest_commit_id 条件下已经删除的 key
-                if key_ts > latest_commit_id || !value.is_empty() {
+                if !delete && (key_ts > latest_commit_id || !value.is_empty()) {
                     new_sst.add(key, value);
                 }
             }
