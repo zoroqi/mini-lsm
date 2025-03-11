@@ -17,8 +17,8 @@ use std::fs::{create_dir, File};
 use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 
 use crate::block::Block;
 use crate::compact::{

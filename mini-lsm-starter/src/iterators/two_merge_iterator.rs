@@ -25,9 +25,9 @@ pub struct TwoMergeIterator<A: StorageIterator, B: StorageIterator> {
 }
 
 impl<
-        A: 'static + StorageIterator,
-        B: 'static + for<'a> StorageIterator<KeyType<'a> = A::KeyType<'a>>,
-    > TwoMergeIterator<A, B>
+    A: 'static + StorageIterator,
+    B: 'static + for<'a> StorageIterator<KeyType<'a> = A::KeyType<'a>>,
+> TwoMergeIterator<A, B>
 {
     pub fn create(a: A, b: B) -> Result<Self> {
         let mut iter = TwoMergeIterator {
@@ -76,9 +76,9 @@ impl<
 }
 
 impl<
-        A: 'static + StorageIterator,
-        B: 'static + for<'a> StorageIterator<KeyType<'a> = A::KeyType<'a>>,
-    > StorageIterator for TwoMergeIterator<A, B>
+    A: 'static + StorageIterator,
+    B: 'static + for<'a> StorageIterator<KeyType<'a> = A::KeyType<'a>>,
+> StorageIterator for TwoMergeIterator<A, B>
 {
     type KeyType<'a> = A::KeyType<'a>;
 

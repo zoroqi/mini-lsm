@@ -15,7 +15,7 @@
 use crate::lsm_storage::WriteBatchRecord::{Del, Put};
 use crate::mvcc::CommittedTxnData;
 use crate::{
-    iterators::{two_merge_iterator::TwoMergeIterator, StorageIterator},
+    iterators::{StorageIterator, two_merge_iterator::TwoMergeIterator},
     lsm_iterator::{FusedIterator, LsmIterator},
     lsm_storage::LsmStorageInner,
 };
