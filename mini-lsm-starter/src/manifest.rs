@@ -18,7 +18,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::compact::CompactionTask;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use bytes::{Buf, BufMut};
 use parking_lot::{Mutex, MutexGuard};
 use serde::{Deserialize, Serialize};

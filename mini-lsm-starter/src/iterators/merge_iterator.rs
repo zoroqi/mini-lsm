@@ -14,8 +14,8 @@
 
 use anyhow::Result;
 use std::cmp::{self};
-use std::collections::binary_heap::PeekMut;
 use std::collections::BinaryHeap;
+use std::collections::binary_heap::PeekMut;
 
 use crate::key::KeySlice;
 

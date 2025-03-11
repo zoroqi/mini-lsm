@@ -16,14 +16,13 @@ use crate::iterators::concat_iterator::SstConcatIterator;
 use crate::mem_table::map_bound;
 use crate::table::SsTableIterator;
 use crate::{
-    iterators::{StorageIterator, merge_iterator::MergeIterator},
     iterators::{
-        merge_iterator::MergeIterator, two_merge_iterator::TwoMergeIterator, StorageIterator,
+        StorageIterator, merge_iterator::MergeIterator, two_merge_iterator::TwoMergeIterator,
     },
     mem_table::MemTableIterator,
 };
-use anyhow::bail;
 use anyhow::Result;
+use anyhow::bail;
 use bytes::Bytes;
 use std::ops::Bound;
 

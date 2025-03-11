@@ -18,8 +18,8 @@ use crossbeam_skiplist::SkipMap;
 use ouroboros::self_referencing;
 use std::ops::Bound;
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::iterators::StorageIterator;
 use crate::key::{KeyBytes, KeySlice, TS_DEFAULT};

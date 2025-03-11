@@ -69,7 +69,7 @@ impl BlockBuilder {
             // println!("3f: {:?}, k: {:?}", self.first_key.key_ref(), k);
 
             let mut new_key = Vec::with_capacity(4 + rest_len); // 预分配容量
-                                                                // println!("3.1nk_ref ptr: {:p}", new_key.as_ptr());
+            // println!("3.1nk_ref ptr: {:p}", new_key.as_ptr());
 
             // println!(
             //     "4f: {:?}, k: {:?}, n:{:?}",
