@@ -18,6 +18,12 @@ pub struct Watermark {
     readers: BTreeMap<u64, usize>,
 }
 
+impl Default for Watermark {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Watermark {
     pub fn new() -> Self {
         Self {
@@ -40,6 +46,10 @@ impl Watermark {
                 self.readers.remove(&ts);
             }
         }
+    }
+
+    pub fn num_retained_snapshots(&self) -> usize {
+        self.readers.len()
     }
 
     pub fn watermark(&self) -> Option<u64> {
