@@ -274,9 +274,6 @@ impl LsmStorageInner {
         self.next_sst_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
-    pub(crate) fn mvcc(&self) -> &LsmMvccInner {
-        self.mvcc.as_ref().unwrap()
-    }
 
     pub(crate) fn mvcc(&self) -> &LsmMvccInner {
         self.mvcc.as_ref().unwrap()

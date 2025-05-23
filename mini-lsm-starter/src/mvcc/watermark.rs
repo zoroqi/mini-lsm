@@ -55,8 +55,4 @@ impl Watermark {
     pub fn watermark(&self) -> Option<u64> {
         self.readers.first_key_value().map(|v| *v.0)
     }
-
-    pub fn num_retained_snapshots(&self) -> usize {
-        self.readers.len()
-    }
 }
