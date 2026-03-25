@@ -111,7 +111,7 @@ We have 3 weeks + 1 extra week (in progress) for this course.
 
 mini-lsm inspired several projects used in production.
 
-* [SlateDB](https://slatedb.io/docs/architecture/) is an LSM engine over the object storage system.
+* [SlateDB](https://slatedb.io/docs/design/overview/) is an LSM engine over the object storage system.
 * [Tonbo](https://tonbo.io/about) stores parquet files directly on the object storage and organizes them in an LSM tree structure.
 
 ## License
